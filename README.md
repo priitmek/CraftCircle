@@ -12,4 +12,4 @@ See the [in-game usage guide](CraftCircle/README.md).
 
 ## Release a version
 
-Update `## Version` in `CraftCircle/CraftCircle.toc`, commit the change, and push a matching version tag such as `v1.4.0`. The GitHub release workflow creates the `-forever.zip` asset that WowUp tracks.
+Update `## Version` in `CraftCircle/CraftCircle.toc`, commit the change, and push a matching version tag such as `v1.4.0`. The GitHub release workflow creates the `-forever.zip` asset that WowUp tracks. To retry packaging an existing tag, run **Publish CraftCircle** from the repository's **Actions** tab and enter the tag.
