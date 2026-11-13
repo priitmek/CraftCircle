@@ -169,11 +169,13 @@ local function Init()
         wipe(ns.db.peers)
     end
     ns.StartSync()
+    ns.StartGear()
     ns.StartProfessions()
     ns.StartSocial()
     ns.CreateLauncher()
     if TooltipDataProcessor and Enum.TooltipDataType then
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, AddItemNeeds)
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, ns.AddGearUpgrades)
     end
 end
 

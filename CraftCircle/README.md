@@ -15,6 +15,10 @@ In **Requests**, drag an item from your bags onto the **Item link or ID** field.
 
 Select your own request to edit or close it. When a matching item tooltip opens on loot, in a bag, or on an item link, CraftCircle shows which synced contacts want it and how many they asked for. Requests match the item's ID, so use the note for details about the version you need. Quantities are maintained by the requester.
 
+## BoE gear upgrades
+
+Bind-on-equip gear tooltips show potential item-level upgrades for guildmates and Battle.net friends running CraftCircle 1.5.0 or later. CraftCircle shares your character level and equipped slot item levels and types through its existing addon-data channels. Comparisons use equipment synced in the last 30 minutes. They account for character level and comparable slots and gear types, while stats, effects, and build preferences need a manual check.
+
 ## Share recipes
 
 Your profession profile includes learned professions and skill ranks. In **Crafters**, click **Share learned recipes** once to turn on automatic sharing for your current character. CraftCircle reads your known profession spells and refreshes when you learn a recipe. If some recipe details are unavailable at login, it can fill them in when the native profession window loads during normal play.

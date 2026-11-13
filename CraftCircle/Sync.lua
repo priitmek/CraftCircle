@@ -84,6 +84,19 @@ pump = function()
     Schedule(delay)
 end
 
+local function QueueGear(key)
+    local payload = ns.GearPayload()
+    if not payload then return end
+    local slot = key and ("gear:" .. key) or "gear:guild"
+    for _, job in ipairs(queue) do
+        if job.slot == slot then
+            job.message = "E:" .. payload
+            return
+        end
+    end
+    Enqueue(slot, "E:" .. payload, nil, key)
+end
+
 local function EncodeText(value)
     return (value:gsub("[^A-Za-z0-9 ._'-]", function(byte) return ("~%02X"):format(byte:byte()) end))
 end
@@ -238,7 +251,11 @@ local function PublishGuild()
         boardTimer = nil
         if not ns.guildID or not IsInGuild() then return end
         boardSentAt = GetTime()
-        if not Enqueue("board", "S:" .. Token() .. ":", Snapshot()) then PublishGuild() end
+        if Enqueue("board", "S:" .. Token() .. ":", Snapshot()) then
+            QueueGear()
+        else
+            PublishGuild()
+        end
     end)
 end
 
@@ -248,7 +265,7 @@ SendBattleNetBoard = function(key, payload)
     if queued[slot] then
         battleNetDirty[key] = true
     else
-        Enqueue(slot, "S:" .. Token() .. ":", payload or Snapshot(), key)
+        if Enqueue(slot, "S:" .. Token() .. ":", payload or Snapshot(), key) then QueueGear(key) end
     end
 end
 
@@ -262,6 +279,7 @@ function ns.Publish()
 end
 
 function ns.ForgetSync(key)
+    ns.ForgetGear(key)
     ns.CancelRecipeRequest(key)
     boardTransfers[key], lastCatalogReply[key] = nil, nil
     lastBattleNetQuery[key], lastBattleNetReply[key], battleNetDirty[key] = nil, nil, nil
@@ -272,6 +290,7 @@ function ns.ForgetSync(key)
 end
 
 function ns.ResetGuildSync()
+    ns.ResetGuildGear()
     if pendingCatalog and not pendingCatalog.battleNet then ns.CancelRecipeRequest() end
     if boardTimer then boardTimer:Cancel(); boardTimer = nil end
     for index = #queue, 1, -1 do
@@ -415,6 +434,10 @@ local function Receive(_, event, prefix, message, channel, sender)
     end
     if message:sub(1, 2) == "Q:" then ReceiveCatalogQuery(key, message, battleNet); return end
     if message:sub(1, 2) == "F:" then ReceiveFind(key, message); return end
+    if message:sub(1, 2) == "E:" then
+        if battleNet or ns.GuildContact(key) then ns.ReceiveGear(key, message:sub(3), battleNet) end
+        return
+    end
 
     local kind, token, part, total, data = message:match("^([SDM]):(%x+):(%d+):(%d+):(.+)$")
     if not token or #token ~= 14 or #data > PART_SIZE then return end

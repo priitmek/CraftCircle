@@ -1,11 +1,12 @@
 ## Interface: 16001
 ## Title: CraftCircle
 ## Notes: A request board and crafting directory for guildmates and Battle.net friends.
-## Version: 1.4.0
+## Version: 1.5.0
 ## SavedVariablesPerCharacter: CraftCircleDB
 
 Core.lua
 Sync.lua
+Gear.lua
 Social.lua
 Professions.lua
 UI.lua
