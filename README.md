@@ -2,6 +2,13 @@
 
 CraftCircle is a request board and recipe directory for World of Warcraft: Forever. It shares requests and opt-in recipe catalogs with guildmates and Battle.net friends through addon data.
 
+## What's new in 1.6.0
+
+- **Offline sync.** My Circle keeps previously synced contacts visible as **Offline · Cached**. Requests and profession summaries stay available for up to 14 days while the sender remains in your circle. Full recipe catalogs require the crafter to be online.
+- **BoE Gear tab.** Browse unbound bind-on-equip gear in your bags and select an item to see potential item-level upgrades for your circle. Offline matches use gear synced within the last seven days and are marked **cached**.
+
+Read the [full changelog](CHANGELOG.md) or get the [latest release](https://github.com/priitmek/CraftCircle/releases/latest). WowUp shows the GitHub release notes in its changelog.
+
 ## Install with WowUp (automatic updates)
 
 **Set up once:**
@@ -21,4 +28,4 @@ See the [in-game usage guide](CraftCircle/README.md).
 
 ## Release a version
 
-Update `## Version` in `CraftCircle/CraftCircle.toc`, commit the change, and push a matching version tag such as `v1.4.0`. The GitHub release workflow creates the `-forever.zip` asset that WowUp tracks. To retry packaging an existing tag, run **Publish CraftCircle** from the repository's **Actions** tab and enter the tag.
+Update `## Version` in `CraftCircle/CraftCircle.toc` and add a matching `## 1.x.y` section to `CHANGELOG.md`. Commit both changes and push the matching version tag. The release workflow publishes that section as the GitHub release notes and attaches the `-forever.zip` asset for WowUp. To retry packaging an existing tag, run **Publish CraftCircle** from **Actions** and enter the tag.

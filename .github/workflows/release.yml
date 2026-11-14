@@ -30,6 +30,14 @@ jobs:
           version="${RELEASE_TAG#v}"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           grep -Fxq "## Version: $version" CraftCircle/CraftCircle.toc
+          notes=$(mktemp)
+          if [[ -f CHANGELOG.md ]]; then
+            awk -v heading="## $version" '
+              $0 == heading { found = 1; next }
+              found && /^## / { exit }
+              found { print }
+            ' CHANGELOG.md > "$notes"
+          fi
           asset="CraftCircle-$version-forever.zip"
           zip -qr "$asset" CraftCircle
           unzip -tq "$asset"
@@ -38,5 +46,9 @@ jobs:
               gh release upload "$RELEASE_TAG" "$asset"
             fi
           else
-            gh release create "$RELEASE_TAG" "$asset" --verify-tag --generate-notes --title "CraftCircle $version"
+            if grep -q '[^[:space:]]' "$notes"; then
+              gh release create "$RELEASE_TAG" "$asset" --verify-tag --notes-file "$notes" --title "CraftCircle $version"
+            else
+              gh release create "$RELEASE_TAG" "$asset" --verify-tag --generate-notes --title "CraftCircle $version"
+            fi
           fi
