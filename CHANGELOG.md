@@ -1,5 +1,9 @@
 # CraftCircle changelog
 
+## 1.6.1
+
+- **Item link entry.** The request field accepts full item links, raw `item:` strings, numeric IDs, and items dragged from bags. Invalid or unrelated links leave the focused field alone when link-clicking.
+
 ## 1.6.0
 
 - **Offline sync.** Previously synced guildmates and Battle.net friends stay visible in **My Circle** as **Offline · Cached**. Requests and profession summaries remain available for up to 14 days. Full recipe catalogs still require the crafter to be online.

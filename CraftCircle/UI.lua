@@ -652,7 +652,7 @@ local function CreateUI()
     Label(ui.form, 0, 12, 250, "POST OR UPDATE A REQUEST", palette.gold, "GameFontNormalSmall")
     Label(ui.form, 0, 33, 170, "Item link or ID", palette.text)
     Label(ui.form, 177, 33, 70, "Quantity", palette.text)
-    ui.item = Input(ui.form, 0, 50, 168, 320)
+    ui.item = Input(ui.form, 0, 50, 168, 1024)
     ui.quantity = Input(ui.form, 177, 50, 73, 5)
     ui.quantity:SetNumeric(true)
     local preview = Icon(ui.form, 0, 83, 19)
@@ -661,7 +661,7 @@ local function CreateUI()
         local id = ns.ItemID(ui.item:GetText())
         local name = id and C_Item.GetItemInfo(id)
         preview:SetTexture(id and ItemIcon(id) or icons.request)
-        itemHint:SetText(name or "Drag an item here from your bags.")
+        itemHint:SetText(name or "Drop, paste, or link an item here.")
     end
     ui.item:SetScript("OnTextChanged", ui.UpdateItemPreview)
     Label(ui.form, 0, 109, 250, "Note (optional)", palette.text)
@@ -678,7 +678,8 @@ local function CreateUI()
     end, true)
     local function DropItem(self)
         local kind, id = GetCursorInfo()
-        if kind == "item" and not (issecretvalue and issecretvalue(id)) and id then
+        if issecretvalue and (issecretvalue(kind) or issecretvalue(id)) then return end
+        if kind == "item" and ns.Integer(id, 1, 99999999) then
             self:SetText(tostring(id))
             ClearCursor()
         end
@@ -687,8 +688,7 @@ local function CreateUI()
     ui.item:SetScript("OnMouseDown", DropItem)
     if ChatFrameUtil and ChatFrameUtil.InsertLink then
         hooksecurefunc(ChatFrameUtil, "InsertLink", function(link)
-            if not ui.item:IsVisible() or not ui.item:HasFocus() or type(link) ~= "string"
-                or (issecretvalue and issecretvalue(link)) then return end
+            if not ui.item:IsVisible() or not ui.item:HasFocus() then return end
             local id = ns.ItemID(link)
             if id then ui.item:SetText(tostring(id)) end
         end)

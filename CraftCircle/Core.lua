@@ -119,7 +119,15 @@ function ns.QueuePeerRefresh()
 end
 
 function ns.ItemID(input)
-    return ns.Integer(input:match("|Hitem:(%d+)[:|]") or input:match("^%s*(%d+)%s*$"), 1, 99999999)
+    if (issecretvalue and issecretvalue(input)) or type(input) ~= "string" then return end
+    local value = input:match("^%s*(.-)%s*$")
+    local payload = value:match("^|H(item:[^|]+)|h[^|]*|h$")
+        or value:match("^|c%x%x%x%x%x%x%x%x|H(item:[^|]+)|h[^|]*|h|r$")
+        or value:match("^|cn[%w_]+:|H(item:[^|]+)|h[^|]*|h|r$")
+        or value
+    local id = payload:match("^item:(%d+)$") or payload:match("^item:(%d+):[%d:%-]*$")
+        or payload:match("^(%d+)$")
+    return ns.Integer(id, 1, 99999999)
 end
 
 function ns.SaveRequest(input, quantity, note)
