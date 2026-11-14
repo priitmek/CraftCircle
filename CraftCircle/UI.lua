@@ -17,7 +17,9 @@ local tabs = {
 }
 local ROWS, WIDTH, HEIGHT = 7, 900, 590
 local ui, tab, page, selected, recipeView, recipeSearch = nil, 1, 1, nil, nil, nil
-local Render, SelectTab
+local Render, SelectTab, CloseRecipeSearch
+local directoryMode, directoryGroup = "profession", nil
+local canHelpOnly = false
 local fallbackIcon = "Interface/Icons/INV_Misc_QuestionMark"
 local itemLoads = {}
 local icons = { request = 133784, circle = 133452, craft = 136241, recipe = "Interface/Icons/INV_Scroll_03" }
@@ -152,13 +154,21 @@ end
 local function BuildRows(query)
     local entries = {}
     if tab == 1 then
+        local bagCounts = {}
         local function AddRequests(key, name, requests)
             for id, request in pairs(requests) do
+                local inBags = bagCounts[id]
+                if key ~= ns.selfKey and inBags == nil then
+                    local count = C_Item.GetItemCount(id)
+                    inBags = not (issecretvalue and issecretvalue(count)) and count or 0
+                    bagCounts[id] = inBags
+                end
                 local title = ItemName(id)
-                if query == "" or Match(title .. " " .. name .. " " .. id .. " " .. request.note, query) then
+                if (not canHelpOnly or (inBags and inBags > 0))
+                    and Match(title .. " " .. name .. " " .. id .. " " .. request.note, query) then
                     entries[#entries + 1] = { key = key .. ":" .. id, owner = key, name = name, id = id,
-                        title = title, detail = name, badge = "x" .. request.quantity,
-                        request = request }
+                        title = title, detail = inBags and inBags > 0 and (name .. "  /  " .. inBags .. " in your bags") or name,
+                        badge = "x" .. request.quantity, request = request, inBags = inBags }
                 end
             end
         end
@@ -180,7 +190,7 @@ local function BuildRows(query)
             local peer = key ~= ns.selfKey and ns.Peer(key)
             local owner = key == ns.selfKey and "You" or ns.Contact(key)
             if owner and owner == result.owner and (not result.guild or result.guild == ns.guildID)
-                and (key == ns.selfKey or ns.SyncContact(key)) then
+                and (key == ns.selfKey or ns.SyncContact(key) or (result.cached and peer)) then
                 local professions = key == ns.selfKey and ns.professions or peer and peer.professions or {}
                 for _, match in ipairs(result.recipes) do
                     local profession
@@ -189,21 +199,37 @@ local function BuildRows(query)
                     end
                     entries[#entries + 1] = { key = key .. ":" .. match.id, owner = key, name = owner,
                         title = match.name, detail = profession and owner .. "  /  " .. profession.name or owner,
-                        badge = "#" .. match.id, spell = match.id, outputItem = match.item, texture = icons.recipe }
+                        badge = result.cached and "CACHED" or "#" .. match.id, spell = match.id, outputItem = match.item,
+                        texture = icons.recipe, profession = profession }
                 end
             end
         end
     elseif tab == 2 then
+        local groups = {}
         local function AddProfessions(key, name, professions)
             for _, profession in ipairs(professions) do
-                if query == "" or Match(profession.name .. " " .. name, query) then
+                local groupKey = directoryMode == "profession" and tostring(profession.id) or key
+                if not directoryGroup then
+                    local group = groups[groupKey]
+                    if not group then
+                        group = { key = groupKey, title = directoryMode == "profession" and profession.name or name,
+                            texture = directoryMode == "profession" and (profession.icon or icons.craft) or icons.craft,
+                            group = true, count = 0 }
+                        groups[groupKey] = group
+                    end
+                    group.count = group.count + 1
+                    group.matches = group.matches or Match(profession.name .. " " .. name, query)
+                elseif groupKey == directoryGroup.key and Match(profession.name .. " " .. name, query) then
                     local count = profession.count
                     if key == ns.selfKey then
                         local catalog = ns.db.recipes[profession.id]
                         count = catalog and catalog.count or 0
                     end
                     entries[#entries + 1] = { key = key .. ":" .. profession.id, owner = key, name = name,
-                        title = profession.name, detail = name, badge = count > 0 and count .. " recipes" or "Skill " .. profession.rank,
+                        title = directoryMode == "profession" and name or profession.name,
+                        detail = "Skill " .. profession.rank .. " / " .. profession.max
+                            .. (key ~= ns.selfKey and ns.ContactOffline(key) and "  /  Offline" or ""),
+                        badge = count > 0 and count .. " recipes" or "Skill " .. profession.rank,
                         texture = profession.icon or icons.craft, profession = profession, count = count }
                 end
             end
@@ -212,6 +238,13 @@ local function BuildRows(query)
         for key in ns.PeerKeys() do
             local peer = ns.Peer(key)
             if peer then AddProfessions(key, ns.Contact(key), peer.professions) end
+        end
+        for _, group in pairs(groups) do
+            if group.matches then
+                group.detail = directoryMode == "profession" and "Browse crafters" or "Browse professions"
+                group.badge = group.count .. (directoryMode == "profession" and " crafters" or " professions")
+                entries[#entries + 1] = group
+            end
         end
     elseif tab == 4 then
         for _, item in ipairs(ns.BagBoEs(RequestItem)) do
@@ -255,15 +288,23 @@ end
 
 local function OpenRecipes(entry)
     local profession = entry.profession
+    CloseRecipeSearch()
     recipeView = { owner = entry.owner, id = profession.id, title = profession.name, name = entry.name }
     selected, page = nil, 1
     ui.search:SetText("")
     if entry.owner == ns.selfKey then
         recipeView.recipes = ns.DecodeRecipes(ns.db.recipes[profession.id].payload)
-    elseif ns.ContactOffline(entry.owner) then
-        recipeView.error = "This crafter is offline. Open their catalog when they return."
-    elseif not ns.RequestRecipes(entry.owner, profession.id) then
-        recipeView.error = "Try loading the catalog again in a few seconds."
+    else
+        local cached = ns.CachedCatalog(entry.owner, profession.id)
+        if cached then
+            recipeView.recipes = ns.DecodeRecipes(cached.payload)
+            recipeView.cached = cached.seen
+        end
+        if ns.ContactOffline(entry.owner) then
+            recipeView.error = "This crafter is offline. Open their catalog when they return."
+        elseif not ns.RequestRecipes(entry.owner, profession.id) then
+            recipeView.error = "Try loading the catalog again in a few seconds."
+        end
     end
     Render()
 end
@@ -272,6 +313,13 @@ function ns.ShowRecipes(key, profession, recipes)
     if not recipeView or recipeView.owner ~= key or recipeView.id ~= profession then return end
     recipeView.recipes = recipes
     recipeView.error = nil
+    recipeView.cached, recipeView.progress = nil, nil
+    Render()
+end
+
+function ns.RecipeProgress(key, profession, count, total)
+    if not recipeView or recipeView.owner ~= key or recipeView.id ~= profession or not total then return end
+    recipeView.progress = ("Received %d of %d parts"):format(count, total)
     Render()
 end
 
@@ -286,7 +334,7 @@ local function CloseCatalog()
     recipeView = nil
 end
 
-local function CloseRecipeSearch()
+CloseRecipeSearch = function()
     ns.CancelRecipeSearch()
     recipeSearch = nil
 end
@@ -298,10 +346,32 @@ local function StartRecipeSearch()
     recipeSearch = { query = query, matches = {
         [ns.selfKey] = { owner = "You", recipes = ns.FindSharedRecipes(query, 12) },
     } }
+    for key in ns.PeerKeys() do
+        local peer = ns.Peer(key)
+        if peer then
+            local matches = {}
+            for _, profession in ipairs(peer.professions) do
+                local catalog = ns.CachedCatalog(key, profession.id)
+                if catalog then
+                    for _, id in ipairs(ns.DecodeRecipes(catalog.payload) or {}) do
+                        local name = RecipeName(id)
+                        if Match(name .. " " .. id, query) then
+                            matches[#matches + 1] = { id = id, profession = profession.id, name = name }
+                            if #matches >= 12 then break end
+                        end
+                    end
+                end
+                if #matches >= 12 then break end
+            end
+            if #matches > 0 then
+                recipeSearch.matches[key] = { owner = ns.Contact(key), recipes = matches, guild = peer.guild, cached = true }
+            end
+        end
+    end
     recipeSearch.waiting = ns.SearchRecipes(query)
     selected, page = nil, 1
     ui.search:ClearFocus()
-    Status(recipeSearch.waiting and "Searching shared catalogs from online contacts." or "Showing matches from your shared catalogs.")
+    Status(recipeSearch.waiting and "Showing saved matches while online crafters reply." or "Showing locally available recipe matches.")
     Render()
 end
 
@@ -337,6 +407,12 @@ local function ResetRequest()
     ui.requestSave.label:SetText("Post request")
 end
 
+local function OpenDirectoryGroup(entry)
+    directoryGroup, selected, page = entry, nil, 1
+    ui.search:SetText("")
+    Render()
+end
+
 local function RenderDetail(entry)
     ui.form:SetShown(tab == 1)
     ui.detailAction:Hide()
@@ -347,7 +423,9 @@ local function RenderDetail(entry)
             return
         end
         SetDetail(entry.owner == ns.selfKey and "YOUR REQUEST" or "FRIEND REQUEST", entry.title,
-            entry.name .. " needs " .. entry.request.quantity .. ".\n" .. entry.request.note)
+            entry.name .. " needs " .. entry.request.quantity .. "."
+            .. (entry.inBags and entry.inBags > 0 and (" You have " .. entry.inBags .. ".") or "")
+            .. "\n" .. entry.request.note)
         if entry.owner == ns.selfKey then
             DetailAction(ui.detailAction, "Edit request", function()
                 ui.item:SetText(tostring(entry.id))
@@ -369,6 +447,12 @@ local function RenderDetail(entry)
     elseif tab == 2 and recipeSearch then
         if entry then
             SetDetail("RECIPE MATCH", entry.title, entry.detail .. "\nHover over the row to inspect the result.")
+            if entry.profession then
+                DetailAction(ui.detailAction, "Browse recipes", function() OpenRecipes(entry) end)
+            end
+        elseif entry.group then
+            SetDetail("CRAFTER DIRECTORY", entry.title, entry.badge)
+            DetailAction(ui.detailAction, "Open list", function() OpenDirectoryGroup(entry) end)
         else
             SetDetail("RECIPE SEARCH", "Who can craft it?", "Matches come from shared catalogs. Online guildmates and Battle.net friends can reply.")
         end
@@ -461,7 +545,8 @@ Render = function()
         elseif ui.search:GetText() ~= "" then
             empty = "No matches. Try another search."
         elseif tab == 1 then
-            empty = "No active requests yet.\nPost an item or sync with your friends."
+            empty = canHelpOnly and "None of the open requests match items in your bags."
+                or "No active requests yet.\nPost an item or sync with your friends."
         elseif tab == 2 then
             empty = "No professions to display yet.\nLearn a profession or sync with a friend."
         elseif tab == 4 then
@@ -475,21 +560,28 @@ Render = function()
     ui.emptyIcon:SetTexture(tab == 1 and icons.request or tab == 2 and icons.craft or icons.circle)
     local canFind = tab == 2 and not recipeView
     ui.find:SetShown(canFind)
+    ui.canHelp:SetShown(tab == 1)
+    ui.canHelp.label:SetText(canHelpOnly and "Show all requests" or "Can help")
     ui.listCount:SetShown(not canFind)
     ui.searchHint:SetText(canFind and "Search crafters or type a recipe name" or "Search this view")
     ui.listCount:SetText(#entries .. (recipeView and " RECIPES" or tab == 1 and " REQUESTS" or
-        tab == 2 and " PROFESSIONS" or tab == 4 and " ITEMS" or " CONTACTS"))
+        tab == 2 and (directoryMode == "person" and not directoryGroup and " PEOPLE" or " PROFESSIONS")
+        or tab == 4 and " ITEMS" or " CONTACTS"))
     ui.page:SetText(page .. " / " .. pages)
     ui.prev:SetEnabled(page > 1)
     ui.next:SetEnabled(page < pages)
     ui.prev:SetAlpha(page > 1 and 1 or 0.45)
     ui.next:SetAlpha(page < pages and 1 or 0.45)
-    ui.back:SetShown(recipeView ~= nil or recipeSearch ~= nil)
+    ui.back:SetShown(recipeView ~= nil or recipeSearch ~= nil or directoryGroup ~= nil)
+    ui.directoryMode:SetShown(tab == 2 and not recipeView and not recipeSearch and not directoryGroup)
+    ui.directoryMode.label:SetText(directoryMode == "profession" and "By profession" or "By person")
     ui.share:SetShown(canFind and not recipeSearch)
     ui.share.label:SetText(ns.db.autoRecipes and "Recipe sharing: On" or "Share learned recipes")
     ui.clearCatalogs:SetShown(tab == 3 and (ns.db.autoRecipes or next(ns.db.recipes) ~= nil))
-    ui.heading:SetText(recipeView and recipeView.title or recipeSearch and "Recipe results" or tabs[tab][2])
-    ui.subtitle:SetText(recipeView and ("Recipes shared by " .. recipeView.name)
+    ui.heading:SetText(recipeView and recipeView.title or recipeSearch and "Recipe results"
+        or directoryGroup and directoryGroup.title or tabs[tab][2])
+    ui.subtitle:SetText(recipeView and (recipeView.progress or (recipeView.cached and Age({seen = recipeView.cached}) .. "  /  " or "")
+        .. "Recipes shared by " .. recipeView.name)
         or recipeSearch and (#entries .. " matches for " .. recipeSearch.query) or tabs[tab][3])
     local contacts = 0
     for key in ns.PeerKeys() do
@@ -502,7 +594,7 @@ end
 SelectTab = function(index)
     CloseCatalog()
     CloseRecipeSearch()
-    tab, page, selected = index, 1, nil
+    tab, page, selected, directoryGroup = index, 1, nil, nil
     ui.search:SetText("")
     ui.search:ClearFocus()
     for i, button in ipairs(ui.tabs) do
@@ -555,8 +647,25 @@ local function CreateUI()
         button.indicator = Block(button, 0, 32, 118, 2, palette.gold)
         ui.tabs[index] = button
     end
-    ui.back = Button(ui, 716, 87, 164, 34, "Back to professions", function() SelectTab(2) end)
+    ui.back = Button(ui, 716, 87, 164, 34, "Back", function()
+        if not recipeView and not recipeSearch then directoryGroup = nil end
+        CloseCatalog()
+        CloseRecipeSearch()
+        selected, page = nil, 1
+        ui.search:SetText("")
+        Render()
+    end)
     ui.back:Hide()
+    ui.directoryMode = Button(ui, 716, 87, 164, 34, "By profession", function()
+        directoryMode = directoryMode == "profession" and "person" or "profession"
+        selected, page = nil, 1
+        Render()
+    end)
+    ui.canHelp = Button(ui, 716, 87, 164, 34, "Can help", function()
+        canHelpOnly = not canHelpOnly
+        selected, page = nil, 1
+        Render()
+    end)
 
     Block(ui, 20, 135, 548, 422, palette.side)
     Block(ui, 20, 135, 548, 1, palette.border)
@@ -603,6 +712,7 @@ local function CreateUI()
         highlight:SetColorTexture(1, 1, 1, 0.08)
         row:SetHighlightTexture(highlight)
         row:SetScript("OnClick", function(self)
+            if self.entry.group then OpenDirectoryGroup(self.entry); return end
             selected = self.entry.key
             Render()
         end)
@@ -788,7 +898,7 @@ refresh:SetScript("OnEvent", function(_, event, id, succeeded)
     if not ui or not ui:IsShown() then return end
     if event == "UI_SCALE_CHANGED" then Fit(); return end
     if event == "BAG_UPDATE_DELAYED" then
-        if tab ~= 4 then return end
+            if tab ~= 4 and tab ~= 1 then return end
     else
         if not succeeded then return end
         if event ~= "SPELL_DATA_LOAD_RESULT" and ns.ItemID(ui.item:GetText()) == id then ui.UpdateItemPreview() end

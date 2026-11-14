@@ -12,6 +12,7 @@ local activeSearch
 local guildQueryAt, boardSentAt = -30, -30
 local pendingCatalog, boardTimer, boardCleanup, sendTimer, ready
 local pump, SendBattleNetBoard
+local interactiveStreak = 0
 
 local function Schedule(delay)
     if sendTimer or #queue == 0 then return end
@@ -28,7 +29,8 @@ local function Enqueue(slot, message, payload, peer)
     if total > MAX_PARTS then return false end
     queue[#queue + 1] = { slot = slot, message = message, payload = payload, part = 1,
         total = total, expires = GetTime() + TIMEOUT, guild = not battleNet and ns.guildID,
-        battleNet = battleNet and battleNet.id, peer = peer }
+        battleNet = battleNet and battleNet.id, peer = peer,
+        interactive = slot == "catalog" or slot:match("^find:") or slot:match("^matches:") or slot:match("^reply:") }
     queued[slot] = true
     Schedule(0)
     return true
@@ -40,7 +42,12 @@ local function DropJob(index)
 end
 
 pump = function()
-    local job = table.remove(queue, 1)
+    local index = 1
+    local prioritizeInteractive = interactiveStreak < 3
+    for position, candidate in ipairs(queue) do
+        if (not not candidate.interactive) == prioritizeInteractive then index = position; break end
+    end
+    local job = table.remove(queue, index)
     if not job then return end
     local delay = 0.24
     local lockdown = C_ChatInfo.InChatMessagingLockdown()
@@ -62,6 +69,7 @@ pump = function()
             result = C_ChatInfo.SendAddonMessage(PREFIX, message, "GUILD")
         end
         if result == results.Success then
+            interactiveStreak = job.interactive and math.min(3, interactiveStreak + 1) or 0
             job.part = job.part + 1
         elseif result == results.AddonMessageThrottle or result == results.ChannelThrottle then
             delay = 1.05
@@ -95,6 +103,14 @@ local function QueueGear(key)
         end
     end
     Enqueue(slot, "E:" .. payload, nil, key)
+end
+
+function ns.PublishGear()
+    if not ready then return end
+    if ns.guildID and IsInGuild() then QueueGear() end
+    for key in pairs(ns.bnetPeers) do
+        if ns.BattleNetContact(key) then QueueGear(key) end
+    end
 end
 
 local function EncodeText(value)
@@ -223,6 +239,7 @@ end
 function ns.CancelRecipeRequest(key)
     if not pendingCatalog or (key and pendingCatalog.key ~= key) then return end
     pendingCatalog.timer:Cancel()
+    if pendingCatalog.fallback then pendingCatalog.fallback:Cancel() end
     pendingCatalog = nil
     for index = #queue, 1, -1 do
         if queue[index].slot == "catalog" then DropJob(index) end
@@ -235,10 +252,21 @@ function ns.RequestRecipes(key, profession)
     local token = Token()
     local battleNet = ns.BattleNetContact(key) ~= nil
     local target = battleNet and "@" or EncodeText(key)
-    if not Enqueue("catalog", "Q:" .. token .. ":" .. profession .. ":" .. target, nil, key) then return false end
-    pendingCatalog = { key = key, token = token, profession = profession, parts = {}, count = 0, battleNet = battleNet }
+    local request = token .. ":" .. profession .. ":" .. target
+    local cached = ns.CachedCatalog(key, profession)
+    if cached then request = request .. ":" .. ns.CatalogFingerprint(cached.payload) end
+    if not Enqueue("catalog", "Q:" .. request, nil, key) then return false end
+    pendingCatalog = { key = key, token = token, profession = profession, parts = {}, count = 0,
+        battleNet = battleNet, cached = cached }
+    if cached then
+        pendingCatalog.fallback = C_Timer.NewTimer(8, function()
+            if pendingCatalog and pendingCatalog.token == token and pendingCatalog.count == 0 then
+                Enqueue("catalog", "Q:" .. token .. ":" .. profession .. ":" .. target, nil, key)
+            end
+        end)
+    end
     pendingCatalog.timer = C_Timer.NewTimer(TIMEOUT, function()
-        pendingCatalog = nil
+        ns.CancelRecipeRequest(key)
         ns.RecipeError(key, profession, "No catalog received. Check that the crafter is online and retry.")
     end)
     return true
@@ -343,7 +371,10 @@ end
 
 local function ReceiveCatalogQuery(key, message, battleNet)
     local token, profession, target = message:match("^Q:(%x+):(%d+):(.+)$")
-    if not token or #token ~= 14 or #target > 144 then return end
+    if not token or #token ~= 14 then return end
+    local destination, fingerprint = target:match("^([^:]+):(%x%x%x%x%x%x%x%x)$")
+    target = destination or target
+    if #target > 144 then return end
     if battleNet then
         if target ~= "@" then return end
     elseif DecodeText(target, 48) ~= ns.selfKey or not ns.GuildContact(key) then
@@ -353,7 +384,9 @@ local function ReceiveCatalogQuery(key, message, battleNet)
     local now = GetTime()
     if not profession or now - (lastCatalogReply[key] or -30) < 6 then return end
     local recipes = ns.db.recipes[profession]
-    if Enqueue("reply:" .. key, "D:" .. token .. ":", recipes and recipes.payload or "R", key) then
+    local payload = recipes and recipes.payload or "R"
+    if fingerprint and fingerprint == ns.CatalogFingerprint(payload) then payload = "=" end
+    if Enqueue("reply:" .. key, "D:" .. token .. ":", payload, key) then
         lastCatalogReply[key] = now
     end
 end
@@ -452,10 +485,17 @@ local function Receive(_, event, prefix, message, channel, sender)
     if not transfer or transfer.token ~= token or transfer.key ~= key or transfer.battleNet ~= battleNet
         or not ns.SyncContact(key) then return end
     local payload = Append(transfer, part, total, data)
-    if not payload then return end
+    if not payload then
+        ns.RecipeProgress(transfer.key, transfer.profession, transfer.count, transfer.total)
+        return
+    end
     ns.CancelRecipeRequest(key)
+    if payload == "=" and transfer.cached then payload = transfer.cached.payload end
     local recipes = ns.DecodeRecipes(payload)
-    if recipes then ns.ShowRecipes(key, transfer.profession, recipes) end
+    if recipes then
+        ns.StoreCatalog(key, transfer.profession, payload, #recipes)
+        ns.ShowRecipes(key, transfer.profession, recipes)
+    end
 end
 
 function ns.StartSync()

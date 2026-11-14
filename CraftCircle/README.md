@@ -21,7 +21,9 @@ Open **BoE Gear** to see unbound bind-on-equip equipment in your bags. Select an
 
 CraftCircle shares character level and equipped item levels and types through its existing addon-data channels. Comparisons use gear synced in the last seven days, including cached gear for offline contacts. Stats, effects, and build preferences need a manual check.
 
-## Share recipes
+## Browse and share recipes
+
+In **Crafters**, click a profession to see its crafters. Use **By profession** to switch to **By person**, then click a name to see that person's professions. Previously opened catalogs remain available from a bounded cache while the crafter is offline, and recipe search includes those saved catalogs.
 
 Your profession profile includes learned professions and skill ranks. In **Crafters**, click **Share learned recipes** once to turn on automatic sharing for your current character. CraftCircle reads your known profession spells and refreshes when you learn a recipe. If some recipe details are unavailable at login, it can fill them in when the native profession window loads during normal play.
 

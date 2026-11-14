@@ -124,7 +124,7 @@ function ns.StartGear()
             local payload = ReadEquipment()
             if payload and payload ~= equipped then
                 equipped = payload
-                ns.Publish()
+                ns.PublishGear()
             end
         end)
     end)

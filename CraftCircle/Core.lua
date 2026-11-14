@@ -187,7 +187,7 @@ end
 local function Init()
     CraftCircleDB = CraftCircleDB or {}
     ns.db = CraftCircleDB
-    for _, key in ipairs({ "requests", "peers", "recipes", "bnetPeers" }) do
+    for _, key in ipairs({ "requests", "peers", "recipes", "bnetPeers", "catalogs" }) do
         if type(ns.db[key]) ~= "table" then ns.db[key] = {} end
     end
     ns.bnetPeers = ns.db.bnetPeers

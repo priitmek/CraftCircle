@@ -4,6 +4,43 @@ local trade = C_TradeSkillUI
 ns.professions = {}
 local autoTimer, openedProfession, scanOpen
 
+function ns.CachedCatalog(key, profession)
+    local peer = ns.Peer(key)
+    local record = ns.db.catalogs[key .. ":" .. profession]
+    if not peer or not record or record.seen <= GetServerTime() - ns.CACHE_AGE
+        or record.guild ~= peer.guild or record.tag ~= (peer.contact and peer.contact.tag)
+        or record.character ~= (peer.contact and peer.contact.character)
+        or record.guid ~= (peer.contact and peer.contact.guid) then return end
+    for _, info in ipairs(peer.professions) do
+        if info.id == profession and info.count == record.count then return record end
+    end
+end
+
+function ns.CatalogFingerprint(payload)
+    local hash = 0
+    for index = 1, #payload do
+        hash = (hash * 131 + payload:byte(index)) % 2147483647
+    end
+    return ("%08x"):format(hash)
+end
+
+function ns.StoreCatalog(key, profession, payload, count)
+    local peer = ns.Peer(key)
+    if not peer then return end
+    local catalogs, id = ns.db.catalogs, key .. ":" .. profession
+    if not catalogs[id] then
+        local size, oldest, oldestTime = 0, nil, math.huge
+        for entry, record in pairs(catalogs) do
+            size = size + 1
+            if record.seen < oldestTime then oldest, oldestTime = entry, record.seen end
+        end
+        if size >= 32 then catalogs[oldest] = nil end
+    end
+    local contact = peer.contact
+    catalogs[id] = { payload = payload, count = count, seen = GetServerTime(), guild = peer.guild,
+        tag = contact and contact.tag, character = contact and contact.character, guid = contact and contact.guid }
+end
+
 function ns.RecipeName(id)
     local name = C_Spell.GetSpellName(id)
     if name and name ~= "" then return name end
