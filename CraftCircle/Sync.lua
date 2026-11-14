@@ -1,8 +1,8 @@
 local _, ns = ...
 
-local PREFIX = "CraftCircle3"
+local PREFIX = "CraftCircle4"
 local PART_SIZE, MAX_PARTS, TIMEOUT = 215, 80, 180
-local MAX_BOARD_PARTS, MAX_GUILD_TRANSFERS = 32, 32
+local MAX_BOARD_PARTS, MAX_GUILD_TRANSFERS = 48, 32
 local results = Enum.SendAddonMessageResult
 local queue, queued, boardTransfers, lastCatalogReply = {}, {}, {}, {}
 local lastBattleNetQuery, lastBattleNetReply, battleNetDirty = {}, {}, {}
@@ -13,6 +13,7 @@ local guildQueryAt, boardSentAt = -30, -30
 local pendingCatalog, boardTimer, boardCleanup, sendTimer, ready
 local pump, SendBattleNetBoard
 local interactiveStreak = 0
+local sentCatalogs = {}
 
 local function Schedule(delay)
     if sendTimer or #queue == 0 then return end
@@ -30,7 +31,8 @@ local function Enqueue(slot, message, payload, peer)
     queue[#queue + 1] = { slot = slot, message = message, payload = payload, part = 1,
         total = total, expires = GetTime() + TIMEOUT, guild = not battleNet and ns.guildID,
         battleNet = battleNet and battleNet.id, peer = peer,
-        interactive = slot == "catalog" or slot:match("^find:") or slot:match("^matches:") or slot:match("^reply:") }
+        interactive = slot == "catalog" or slot == "catalog-retry"
+            or slot:match("^find:") or slot:match("^matches:") or slot:match("^reply:") }
     queued[slot] = true
     Schedule(0)
     return true
@@ -57,8 +59,9 @@ pump = function()
     if valid and GetTime() < job.expires then
         local message = job.message
         if job.payload then
-            local start = (job.part - 1) * PART_SIZE + 1
-            message = message .. job.part .. ":" .. job.total .. ":" .. job.payload:sub(start, start + PART_SIZE - 1)
+            local part = job.parts and job.parts[job.part] or job.part
+            local start = (part - 1) * PART_SIZE + 1
+            message = message .. part .. ":" .. job.total .. ":" .. job.payload:sub(start, start + PART_SIZE - 1)
         end
         local result
         if lockdown then
@@ -76,9 +79,9 @@ pump = function()
         elseif result == results.AddOnMessageLockdown then
             delay = 5
         else
-            job.part = job.total + 1
+            job.part = MAX_PARTS + 1
         end
-        if job.part <= job.total then
+        if job.part <= (job.parts and #job.parts or job.total) then
             queue[#queue + 1] = job
             Schedule(delay)
             return
@@ -125,7 +128,10 @@ end
 local function Snapshot()
     local rows = { "B" }
     for id, request in pairs(ns.db.requests) do
-        rows[#rows + 1] = table.concat({ "N", id, request.quantity, EncodeText(request.note) }, ",")
+        rows[#rows + 1] = table.concat({ "N", id, request.quantity, request.ticket, EncodeText(request.note) }, ",")
+    end
+    for ticket, entry in pairs(ns.db.contributions) do
+        rows[#rows + 1] = table.concat({ "C", ticket, entry.pledged, entry.delivered }, ",")
     end
     for _, profession in ipairs(ns.professions) do
         local count = ns.db.recipes[profession.id] and ns.db.recipes[profession.id].count or 0
@@ -136,16 +142,23 @@ end
 
 local function DecodeBoard(payload)
     if payload:sub(1, 1) ~= "B" or (#payload > 1 and payload:sub(2, 2) ~= ";") then return end
-    local snapshot = { requests = {}, professions = {} }
-    local requests, professions = 0, {}
+    local snapshot = { requests = {}, professions = {}, contributions = {} }
+    local requests, professions, contributions = 0, {}, 0
     for row in payload:sub(2):gmatch("[^;]+") do
-        local id, amount, note = row:match("^N,(%d+),(%d+),(.*)$")
+        local id, amount, ticket, note = row:match("^N,(%d+),(%d+),(%x+),(.*)$")
         if id then
             id = ns.Integer(id, 1, 99999999)
             amount = ns.Integer(amount, 1, 99999)
-            if not id or not amount or snapshot.requests[id] or requests >= ns.MAX_REQUESTS then return end
-            snapshot.requests[id] = { quantity = amount, note = DecodeText(note, 80) }
+            if not id or not amount or #ticket ~= 14 or snapshot.requests[id] or requests >= ns.MAX_REQUESTS then return end
+            snapshot.requests[id] = { quantity = amount, note = DecodeText(note, 80), ticket = ticket }
             requests = requests + 1
+        elseif row:sub(1, 2) == "C," then
+            local token, pledged, delivered = row:match("^C,(%x+),(%d+),(%d+)$")
+            pledged, delivered = ns.Integer(pledged, 0, 99999), ns.Integer(delivered, 0, 99999)
+            if not token or #token ~= 14 or not pledged or not delivered or contributions >= 24
+                or snapshot.contributions[token] then return end
+            snapshot.contributions[token] = { pledged = pledged, delivered = delivered }
+            contributions = contributions + 1
         else
             local pid, rank, maxRank, count, name = row:match("^P,(%d+),(%d+),(%d+),(%d+),(.+)$")
             pid = ns.Integer(pid, 1, 99999)
@@ -163,6 +176,17 @@ local function DecodeBoard(payload)
 end
 
 function ns.DecodeRecipes(payload)
+    if payload:sub(1, 2) == "Z," then
+        local ids, previous = {}, 0
+        for value in (payload:sub(3) .. ","):gmatch("([^,]*),") do
+            if #value > 6 or not value:match("^[0-9a-z]+$") or #ids >= ns.MAX_RECIPES then return end
+            local delta = tonumber(value, 36)
+            previous = previous + delta
+            if delta < 1 or previous > 99999999 then return end
+            ids[#ids + 1] = previous
+        end
+        return ids
+    end
     if payload == "R" then return {} end
     if not payload:match("^R,%d[%d,]*%d$") and not payload:match("^R,%d$") then return end
     if payload:find(",,", 1, true) then return end
@@ -173,6 +197,25 @@ function ns.DecodeRecipes(payload)
         recipes[#recipes + 1], previous = id, id
     end
     return recipes
+end
+
+local function CompressCatalog(payload)
+    local ids = ns.DecodeRecipes(payload)
+    if not ids or #ids == 0 then return payload end
+    local values, previous = { "Z" }, 0
+    local digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    for _, id in ipairs(ids) do
+        local delta, encoded = id - previous, ""
+        previous = id
+        while delta > 0 do
+            local digit = delta % 36 + 1
+            encoded = digits:sub(digit, digit) .. encoded
+            delta = math.floor(delta / 36)
+        end
+        values[#values + 1] = encoded
+    end
+    local compressed = table.concat(values, ",")
+    return #compressed < #payload and compressed or payload
 end
 
 local function Token()
@@ -240,9 +283,10 @@ function ns.CancelRecipeRequest(key)
     if not pendingCatalog or (key and pendingCatalog.key ~= key) then return end
     pendingCatalog.timer:Cancel()
     if pendingCatalog.fallback then pendingCatalog.fallback:Cancel() end
+    if pendingCatalog.retry then pendingCatalog.retry:Cancel() end
     pendingCatalog = nil
     for index = #queue, 1, -1 do
-        if queue[index].slot == "catalog" then DropJob(index) end
+        if queue[index].slot == "catalog" or queue[index].slot == "catalog-retry" then DropJob(index) end
     end
 end
 
@@ -258,13 +302,11 @@ function ns.RequestRecipes(key, profession)
     if not Enqueue("catalog", "Q:" .. request, nil, key) then return false end
     pendingCatalog = { key = key, token = token, profession = profession, parts = {}, count = 0,
         battleNet = battleNet, cached = cached }
-    if cached then
-        pendingCatalog.fallback = C_Timer.NewTimer(8, function()
-            if pendingCatalog and pendingCatalog.token == token and pendingCatalog.count == 0 then
-                Enqueue("catalog", "Q:" .. token .. ":" .. profession .. ":" .. target, nil, key)
-            end
-        end)
-    end
+    pendingCatalog.fallback = C_Timer.NewTimer(12, function()
+        if pendingCatalog and pendingCatalog.token == token and pendingCatalog.count == 0 then
+            Enqueue("catalog", "Q:" .. request, nil, key)
+        end
+    end)
     pendingCatalog.timer = C_Timer.NewTimer(TIMEOUT, function()
         ns.CancelRecipeRequest(key)
         ns.RecipeError(key, profession, "No catalog received. Check that the crafter is online and retry.")
@@ -307,6 +349,7 @@ function ns.Publish()
 end
 
 function ns.ForgetSync(key)
+    sentCatalogs[key] = nil
     if not ns.bnetPeers[key] then ns.ForgetGear(key) end
     ns.CancelRecipeRequest(key)
     boardTransfers[key], lastCatalogReply[key] = nil, nil
@@ -329,6 +372,9 @@ function ns.ResetGuildSync()
     end
     for key in pairs(lastCatalogReply) do
         if not ns.bnet[key] then lastCatalogReply[key] = nil end
+    end
+    for key in pairs(sentCatalogs) do
+        if not ns.bnet[key] then sentCatalogs[key] = nil end
     end
     for key in pairs(lastFindReply) do
         if not ns.bnet[key] then lastFindReply[key] = nil end
@@ -386,9 +432,42 @@ local function ReceiveCatalogQuery(key, message, battleNet)
     local recipes = ns.db.recipes[profession]
     local payload = recipes and recipes.payload or "R"
     if fingerprint and fingerprint == ns.CatalogFingerprint(payload) then payload = "=" end
+    payload = CompressCatalog(payload)
     if Enqueue("reply:" .. key, "D:" .. token .. ":", payload, key) then
         lastCatalogReply[key] = now
+        sentCatalogs[key] = { token = token, payload = payload, expires = now + TIMEOUT, battleNet = battleNet }
+        local sent = sentCatalogs[key]
+        C_Timer.NewTimer(TIMEOUT, function()
+            if sentCatalogs[key] == sent then sentCatalogs[key] = nil end
+        end)
     end
+end
+
+local function ResendCatalog(key, message, battleNet)
+    local token, bitmap = message:match("^K:(%x+):([01]+)$")
+    local sent = sentCatalogs[key]
+    if not sent or sent.token ~= token or sent.battleNet ~= battleNet or sent.expires <= GetTime()
+        or not ns.SyncContact(key) or #bitmap ~= math.ceil(#sent.payload / PART_SIZE) then return end
+    local slot = "reply:" .. key
+    local parts = {}
+    for index = 1, #bitmap do
+        if bitmap:sub(index, index) == "1" then parts[#parts + 1] = index end
+    end
+    if #parts > 0 and Enqueue(slot, "D:" .. token .. ":", sent.payload, key) then
+        queue[#queue].parts = parts
+    end
+end
+
+local function ScheduleCatalogRetry(transfer)
+    if transfer.retry then transfer.retry:Cancel() end
+    transfer.retry = C_Timer.NewTimer(12, function()
+        if pendingCatalog ~= transfer or (transfer.retries or 0) >= 3 then return end
+        transfer.retries = (transfer.retries or 0) + 1
+        local bitmap = {}
+        for index = 1, transfer.total do bitmap[index] = transfer.parts[index] and "0" or "1" end
+        Enqueue("catalog-retry", "K:" .. transfer.token .. ":" .. table.concat(bitmap), nil, transfer.key)
+        ScheduleCatalogRetry(transfer)
+    end)
 end
 
 local function ReceiveFind(key, message)
@@ -466,6 +545,7 @@ local function Receive(_, event, prefix, message, channel, sender)
         return
     end
     if message:sub(1, 2) == "Q:" then ReceiveCatalogQuery(key, message, battleNet); return end
+    if message:sub(1, 2) == "K:" then ResendCatalog(key, message, battleNet); return end
     if message:sub(1, 2) == "F:" then ReceiveFind(key, message); return end
     if message:sub(1, 2) == "E:" then
         if battleNet or ns.GuildContact(key) then ns.ReceiveGear(key, message:sub(3), battleNet) end
@@ -487,13 +567,15 @@ local function Receive(_, event, prefix, message, channel, sender)
     local payload = Append(transfer, part, total, data)
     if not payload then
         ns.RecipeProgress(transfer.key, transfer.profession, transfer.count, transfer.total)
+        if transfer.total then ScheduleCatalogRetry(transfer) end
         return
     end
     ns.CancelRecipeRequest(key)
     if payload == "=" and transfer.cached then payload = transfer.cached.payload end
     local recipes = ns.DecodeRecipes(payload)
     if recipes then
-        ns.StoreCatalog(key, transfer.profession, payload, #recipes)
+        local canonical = #recipes > 0 and ("R," .. table.concat(recipes, ",")) or "R"
+        ns.StoreCatalog(key, transfer.profession, canonical, #recipes)
         ns.ShowRecipes(key, transfer.profession, recipes)
     end
 end

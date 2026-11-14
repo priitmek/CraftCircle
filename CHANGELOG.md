@@ -1,5 +1,15 @@
 # CraftCircle changelog
 
+## 1.8.0
+
+- **Shared checklist.** Set a pledge or record a delivery on item requests. See pledged, delivered, and remaining quantities.
+- **Native profession links.** Opening a linked profession can save the learned recipes shown by WoW to your local directory and search.
+- **Smaller recipe transfers.** Catalogs use compressed recipe IDs and retry missing parts.
+- **Item linking and readability.** The request field listens to the native modified-click handler. CraftCircle has a new logo and larger, clearer text.
+- **WowUp.** Releases include explicit WoW Forever metadata alongside the release notes.
+
+Update together with your circle for this release. Version 1.8 uses a new sync protocol.
+
 ## 1.7.0
 
 - **Crafter directory.** Browse by profession or by person, then open the crafter's recipe catalog.

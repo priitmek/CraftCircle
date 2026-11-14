@@ -1,13 +1,16 @@
 # CraftCircle
 
+![CraftCircle anvil logo](CraftCircle/Art/Logo.png)
+
 CraftCircle is a request board and recipe directory for World of Warcraft: Forever. It shares requests and opt-in recipe catalogs with guildmates and Battle.net friends through addon data.
 
-## What's new in 1.6.0
+## What's new in 1.8.0
 
-- **Offline sync.** My Circle keeps previously synced contacts visible as **Offline · Cached**. Requests and profession summaries stay available for up to 14 days while the sender remains in your circle. Full recipe catalogs require the crafter to be online.
-- **BoE Gear tab.** Browse unbound bind-on-equip gear in your bags and select an item to see potential item-level upgrades for your circle. Offline matches use gear synced within the last seven days and are marked **cached**.
+- **Shared checklist.** Pledge or record delivery of items and see how many are still needed.
+- **Recipe discovery.** Open a native profession link to add the learned recipes WoW displays to your local recipe search. Shared catalogs transfer with compressed IDs and missing-part retries.
+- **Item linking and readability.** Click the item field and Shift-left-click an item in your bags. The window has clearer type and a new anvil logo.
 
-Read the [full changelog](CHANGELOG.md) or get the [latest release](https://github.com/priitmek/CraftCircle/releases/latest). WowUp shows the GitHub release notes in its changelog.
+Update to 1.8.0 together with your circle to sync on the new protocol. For each WowUp update, CraftCircle publishes notes in the corresponding GitHub release. [Full changelog](CHANGELOG.md) · [Latest release](https://github.com/priitmek/CraftCircle/releases/latest)
 
 ## Install with WowUp (automatic updates)
 

@@ -4,6 +4,58 @@ local trade = C_TradeSkillUI
 ns.professions = {}
 local autoTimer, openedProfession, scanOpen
 
+function ns.ObservedCatalogs()
+    local now = GetServerTime()
+    return function(records, key)
+        repeat
+            key = next(records, key)
+            if not key then return end
+            local record = records[key]
+            if record.seen > now - ns.CACHE_AGE then return key, record end
+        until false
+    end, ns.db.observed, nil
+end
+
+local function ObserveLinkedProfession()
+    if not trade.IsTradeSkillLinked or trade.IsDataSourceChanging() then return end
+    local linked, owner = trade.IsTradeSkillLinked()
+    if issecretvalue and (issecretvalue(linked) or issecretvalue(owner)) then return end
+    if not linked then return end
+    local key, name = ns.Character(owner)
+    local info = trade.GetBaseProfessionInfo()
+    if not key or key == ns.selfKey or C_FriendList.IsIgnored(name) or not info or not info.professionID
+        or info.professionID <= 0 then return end
+    local ids, seen = {}, {}
+    for _, id in ipairs(trade.GetFilteredRecipeIDs() or {}) do
+        local recipe = trade.GetRecipeInfo(id)
+        if recipe and recipe.learned and not recipe.isDummyRecipe and not recipe.isRecraft and not seen[id] then
+            ids[#ids + 1], seen[id] = id, true
+            if #ids >= ns.MAX_RECIPES then break end
+        end
+    end
+    if #ids == 0 then return end
+    local records, identity = ns.db.observed, key .. ":" .. info.professionID
+    local previous = records[identity]
+    if previous then
+        for _, id in ipairs(previous.recipes) do
+            if #ids >= ns.MAX_RECIPES then break end
+            if not seen[id] then ids[#ids + 1] = id end
+        end
+    else
+        local size, oldest, oldestTime = 0, nil, math.huge
+        for id, record in pairs(records) do
+            size = size + 1
+            if record.seen < oldestTime then oldest, oldestTime = id, record.seen end
+        end
+        if size >= 32 then records[oldest] = nil end
+    end
+    table.sort(ids)
+    records[identity] = { owner = key, name = name, recipes = ids, seen = GetServerTime(),
+        profession = { id = info.professionID, name = ns.Text(info.professionName, 64),
+            rank = info.skillLevel or 0, max = info.maxSkillLevel or 0 } }
+    ns.Changed()
+end
+
 function ns.CachedCatalog(key, profession)
     local peer = ns.Peer(key)
     local record = ns.db.catalogs[key .. ":" .. profession]
@@ -181,6 +233,7 @@ function ns.StartProfessions()
         if event == "TRADE_SKILL_SHOW" then
             openedProfession = true
         elseif event == "TRADE_SKILL_LIST_UPDATE" then
+            ObserveLinkedProfession()
             if not openedProfession or not OpenProfession() then return end
             openedProfession, scanOpen = nil, true
             ScheduleScan()

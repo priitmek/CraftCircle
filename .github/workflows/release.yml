@@ -41,14 +41,18 @@ jobs:
           asset="CraftCircle-$version-forever.zip"
           zip -qr "$asset" CraftCircle
           unzip -tq "$asset"
+          printf '{"releases":[{"filename":"%s","nolib":false,"metadata":[{"flavor":"forever","interface":16001}]}]}\n' "$asset" > release.json
           if existing=$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' 2>/dev/null); then
             if ! grep -Fxq "$asset" <<< "$existing"; then
               gh release upload "$RELEASE_TAG" "$asset"
             fi
+            if ! grep -Fxq 'release.json' <<< "$existing"; then
+              gh release upload "$RELEASE_TAG" release.json
+            fi
           else
             if grep -q '[^[:space:]]' "$notes"; then
-              gh release create "$RELEASE_TAG" "$asset" --verify-tag --notes-file "$notes" --title "CraftCircle $version"
+              gh release create "$RELEASE_TAG" "$asset" release.json --verify-tag --notes-file "$notes" --title "CraftCircle $version"
             else
-              gh release create "$RELEASE_TAG" "$asset" --verify-tag --generate-notes --title "CraftCircle $version"
+              gh release create "$RELEASE_TAG" "$asset" release.json --verify-tag --generate-notes --title "CraftCircle $version"
             fi
           fi

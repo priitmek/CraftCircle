@@ -34,6 +34,8 @@ In WowUp, go to **Options → Clients**, select **WoW Forever**, click **Edit**,
 
 **WowUp is not updating it:** In **My Addons**, right-click **CraftCircle**, confirm **Auto Update** is checked and **Ignore** is not checked. Check that the author has published a newer [GitHub Release](https://github.com/priitmek/CraftCircle/releases). Run WowUp while WoW is closed.
 
+**WowUp's changelog is empty:** Refresh **My Addons** and check that CraftCircle is tracked through GitHub. The first install from a repository URL may show an empty changelog until WowUp fetches the release during its update check. You can read the same notes immediately on the [latest GitHub release](https://github.com/priitmek/CraftCircle/releases/latest).
+
 **You previously copied CraftCircle manually:** Install it through WowUp using the **repository URL** so WowUp can track the release. Avoid leaving duplicate `CraftCircle` folders in the Forever AddOns directory.
 
 ## For the addon author: publishing an update

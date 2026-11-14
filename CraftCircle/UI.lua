@@ -23,6 +23,8 @@ local canHelpOnly = false
 local fallbackIcon = "Interface/Icons/INV_Misc_QuestionMark"
 local itemLoads = {}
 local icons = { request = 133784, circle = 133452, craft = 136241, recipe = "Interface/Icons/INV_Scroll_03" }
+local logo = "Interface/AddOns/CraftCircle/Art/Logo"
+local readingFont = "Fonts/ARIALN.TTF"
 
 local function Place(region, x, y, width, height)
     region:SetPoint("TOPLEFT", x, -y)
@@ -47,6 +49,8 @@ local function Label(parent, x, y, width, text, color, font, wrap)
     label:SetJustifyV("TOP")
     label:SetWordWrap(wrap == true)
     label:SetTextColor(unpack(color or palette.text))
+    local size = font == "GameFontHighlightLarge" and 19 or font == "GameFontNormalSmall" and 13 or 15
+    label:SetFont(readingFont, size, "")
     label:SetText(text)
     return label
 end
@@ -73,6 +77,7 @@ local function Button(parent, x, y, width, height, title, handler, primary)
     button:SetHighlightTexture(glow)
     local label = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     label:SetPoint("CENTER")
+    label:SetFont(readingFont, 14, "")
     label:SetTextColor(unpack(primary and palette.dark or palette.text))
     label:SetText(title)
     button.label = label
@@ -85,7 +90,7 @@ local function Input(parent, x, y, width, maxLetters)
     field:SetBackdrop({ bgFile = "Interface/Buttons/WHITE8X8", edgeFile = "Interface/Buttons/WHITE8X8", edgeSize = 1 })
     field:SetBackdropColor(unpack(palette.base))
     field:SetBackdropBorderColor(unpack(palette.border))
-    field:SetFontObject("GameFontHighlight")
+    field:SetFont(readingFont, 15, "")
     field:SetTextInsets(9, 9, 0, 0)
     field:SetAutoFocus(false)
     field:SetMaxLetters(maxLetters)
@@ -157,6 +162,8 @@ local function BuildRows(query)
         local bagCounts = {}
         local function AddRequests(key, name, requests)
             for id, request in pairs(requests) do
+                local _, delivered = ns.ContributionTotals(request.ticket)
+                local remaining = math.max(0, request.quantity - delivered)
                 local inBags = bagCounts[id]
                 if key ~= ns.selfKey and inBags == nil then
                     local count = C_Item.GetItemCount(id)
@@ -164,11 +171,11 @@ local function BuildRows(query)
                     bagCounts[id] = inBags
                 end
                 local title = ItemName(id)
-                if (not canHelpOnly or (inBags and inBags > 0))
+                if (not canHelpOnly or (remaining > 0 and inBags and inBags > 0))
                     and Match(title .. " " .. name .. " " .. id .. " " .. request.note, query) then
                     entries[#entries + 1] = { key = key .. ":" .. id, owner = key, name = name, id = id,
                         title = title, detail = inBags and inBags > 0 and (name .. "  /  " .. inBags .. " in your bags") or name,
-                        badge = "x" .. request.quantity, request = request, inBags = inBags }
+                        badge = remaining > 0 and (remaining .. " left") or "Delivered", request = request, inBags = inBags }
                 end
             end
         end
@@ -188,10 +195,11 @@ local function BuildRows(query)
     elseif tab == 2 and recipeSearch then
         for key, result in pairs(recipeSearch.matches) do
             local peer = key ~= ns.selfKey and ns.Peer(key)
-            local owner = key == ns.selfKey and "You" or ns.Contact(key)
+            local owner = result.observed and result.observed.name or key == ns.selfKey and "You" or ns.Contact(key)
             if owner and owner == result.owner and (not result.guild or result.guild == ns.guildID)
-                and (key == ns.selfKey or ns.SyncContact(key) or (result.cached and peer)) then
-                local professions = key == ns.selfKey and ns.professions or peer and peer.professions or {}
+                and (result.observed or key == ns.selfKey or ns.SyncContact(key) or (result.cached and peer)) then
+                local professions = result.observed and { result.observed.profession }
+                    or key == ns.selfKey and ns.professions or peer and peer.professions or {}
                 for _, match in ipairs(result.recipes) do
                     local profession
                     for _, info in ipairs(professions) do
@@ -199,14 +207,15 @@ local function BuildRows(query)
                     end
                     entries[#entries + 1] = { key = key .. ":" .. match.id, owner = key, name = owner,
                         title = match.name, detail = profession and owner .. "  /  " .. profession.name or owner,
-                        badge = result.cached and "CACHED" or "#" .. match.id, spell = match.id, outputItem = match.item,
-                        texture = icons.recipe, profession = profession }
+                        badge = result.observed and "LINK" or result.cached and "CACHED" or "#" .. match.id,
+                        spell = match.id, outputItem = match.item,
+                        texture = icons.recipe, profession = profession, observed = result.observed }
                 end
             end
         end
     elseif tab == 2 then
         local groups = {}
-        local function AddProfessions(key, name, professions)
+        local function AddProfessions(key, name, professions, observed)
             for _, profession in ipairs(professions) do
                 local groupKey = directoryMode == "profession" and tostring(profession.id) or key
                 if not directoryGroup then
@@ -220,7 +229,7 @@ local function BuildRows(query)
                     group.count = group.count + 1
                     group.matches = group.matches or Match(profession.name .. " " .. name, query)
                 elseif groupKey == directoryGroup.key and Match(profession.name .. " " .. name, query) then
-                    local count = profession.count
+                    local count = observed and #observed.recipes or profession.count
                     if key == ns.selfKey then
                         local catalog = ns.db.recipes[profession.id]
                         count = catalog and catalog.count or 0
@@ -230,7 +239,7 @@ local function BuildRows(query)
                         detail = "Skill " .. profession.rank .. " / " .. profession.max
                             .. (key ~= ns.selfKey and ns.ContactOffline(key) and "  /  Offline" or ""),
                         badge = count > 0 and count .. " recipes" or "Skill " .. profession.rank,
-                        texture = profession.icon or icons.craft, profession = profession, count = count }
+                        texture = profession.icon or icons.craft, profession = profession, count = count, observed = observed }
                 end
             end
         end
@@ -238,6 +247,14 @@ local function BuildRows(query)
         for key in ns.PeerKeys() do
             local peer = ns.Peer(key)
             if peer then AddProfessions(key, ns.Contact(key), peer.professions) end
+        end
+        for identity, record in ns.ObservedCatalogs() do
+            local peer = ns.Peer(record.owner)
+            local shared
+            for _, profession in ipairs(peer and peer.professions or {}) do
+                if profession.id == record.profession.id and profession.count > 0 then shared = true; break end
+            end
+            if not shared then AddProfessions("observed:" .. identity, record.name, { record.profession }, record) end
         end
         for _, group in pairs(groups) do
             if group.matches then
@@ -292,7 +309,10 @@ local function OpenRecipes(entry)
     recipeView = { owner = entry.owner, id = profession.id, title = profession.name, name = entry.name }
     selected, page = nil, 1
     ui.search:SetText("")
-    if entry.owner == ns.selfKey then
+    if entry.observed then
+        recipeView.recipes = entry.observed.recipes
+        recipeView.observed = entry.observed.seen
+    elseif entry.owner == ns.selfKey then
         recipeView.recipes = ns.DecodeRecipes(ns.db.recipes[profession.id].payload)
     else
         local cached = ns.CachedCatalog(entry.owner, profession.id)
@@ -368,6 +388,19 @@ local function StartRecipeSearch()
             end
         end
     end
+    for identity, record in ns.ObservedCatalogs() do
+        local matches = {}
+        for _, id in ipairs(record.recipes) do
+            local name = RecipeName(id)
+            if Match(name .. " " .. id, query) then
+                matches[#matches + 1] = { id = id, name = name, profession = record.profession.id }
+                if #matches >= 12 then break end
+            end
+        end
+        if #matches > 0 then
+            recipeSearch.matches["observed:" .. identity] = { owner = record.name, recipes = matches, observed = record }
+        end
+    end
     recipeSearch.waiting = ns.SearchRecipes(query)
     selected, page = nil, 1
     ui.search:ClearFocus()
@@ -401,6 +434,7 @@ local function DetailAction(button, title, handler)
 end
 
 local function ResetRequest()
+    ui.itemLinkArmed = nil
     ui.item:SetText("")
     ui.quantity:SetText("1")
     ui.note:SetText("")
@@ -415,6 +449,7 @@ end
 
 local function RenderDetail(entry)
     ui.form:SetShown(tab == 1)
+    ui.contribution:SetShown(tab == 1 and entry ~= nil and entry.owner ~= ns.selfKey and entry.request.ticket ~= nil)
     ui.detailAction:Hide()
     ui.altAction:Hide()
     if tab == 1 then
@@ -422,10 +457,12 @@ local function RenderDetail(entry)
             SetDetail("THE REQUEST BOARD", "Ask your circle", "Post an item and quantity. Guildmates and Battle.net friends can see it on their board and item tooltips.")
             return
         end
+        local ticket = entry.request.ticket
+        local pledged, delivered = ns.ContributionTotals(ticket)
+        local remaining = math.max(0, entry.request.quantity - delivered)
         SetDetail(entry.owner == ns.selfKey and "YOUR REQUEST" or "FRIEND REQUEST", entry.title,
-            entry.name .. " needs " .. entry.request.quantity .. "."
-            .. (entry.inBags and entry.inBags > 0 and (" You have " .. entry.inBags .. ".") or "")
-            .. "\n" .. entry.request.note)
+            ("%d of %d delivered  ·  %d pledged\n%d remaining%s\n%s"):format(delivered, entry.request.quantity,
+                pledged, remaining, entry.inBags and ("  ·  " .. entry.inBags .. " in your bags") or "", entry.request.note))
         if entry.owner == ns.selfKey then
             DetailAction(ui.detailAction, "Edit request", function()
                 ui.item:SetText(tostring(entry.id))
@@ -439,6 +476,19 @@ local function RenderDetail(entry)
                 ResetRequest()
                 Status("Request closed.")
             end)
+        elseif ticket then
+            if ui.contribution.ticket ~= ticket then
+                ui.contribution.ticket = ticket
+                ui.contribution:SetText(tostring(math.min(math.max(0, remaining - pledged), entry.inBags or 0)))
+            end
+            local function Submit(delivery)
+                local quantity = ns.Integer(ui.contribution:GetText(), delivery and 1 or 0, 99999)
+                if not quantity then Status("Enter a valid contribution quantity.", true); return end
+                ns.Contribute(ticket, quantity, delivery)
+                Status(delivery and "Delivery recorded." or "Pledge updated. Use zero to clear it.")
+            end
+            DetailAction(ui.detailAction, "Set pledge", function() Submit(false) end)
+            DetailAction(ui.altAction, "Record delivery", function() Submit(true) end)
         end
     elseif tab == 2 and recipeView then
         SetDetail("SHARED RECIPE CATALOG", entry and entry.title or recipeView.title,
@@ -580,7 +630,9 @@ Render = function()
     ui.clearCatalogs:SetShown(tab == 3 and (ns.db.autoRecipes or next(ns.db.recipes) ~= nil))
     ui.heading:SetText(recipeView and recipeView.title or recipeSearch and "Recipe results"
         or directoryGroup and directoryGroup.title or tabs[tab][2])
-    ui.subtitle:SetText(recipeView and (recipeView.progress or (recipeView.cached and Age({seen = recipeView.cached}) .. "  /  " or "")
+    ui.subtitle:SetText(recipeView and (recipeView.observed and
+        ("Seen in profession link  /  " .. date("%d %b", recipeView.observed))
+        or recipeView.progress or (recipeView.cached and Age({seen = recipeView.cached}) .. "  /  " or "")
         .. "Recipes shared by " .. recipeView.name)
         or recipeSearch and (#entries .. " matches for " .. recipeSearch.query) or tabs[tab][3])
     local contacts = 0
@@ -592,6 +644,7 @@ Render = function()
 end
 
 SelectTab = function(index)
+    ui.itemLinkArmed = nil
     CloseCatalog()
     CloseRecipeSearch()
     tab, page, selected, directoryGroup = index, 1, nil, nil
@@ -629,10 +682,10 @@ local function CreateUI()
     Block(ui, 1, 1, WIDTH - 2, 2, palette.copper)
     Block(ui, 20, 13, 49, 49, palette.copper)
     Block(ui, 22, 15, 45, 45, palette.inset)
-    Icon(ui, 26, 19, 37, icons.craft)
+    Icon(ui, 22, 15, 45, logo)
     local brand = Label(ui, 84, 14, 360, "CraftCircle", palette.text, "GameFontHighlightLarge")
-    if GameFontHighlightLarge then brand:SetFont(GameFontHighlightLarge:GetFont(), 25, "") end
-    Label(ui, 86, 48, 320, "F O R E V E R   /   T H E   W O R K S H O P", palette.gold, "GameFontNormalSmall")
+    brand:SetFont(readingFont, 25, "")
+    Label(ui, 86, 48, 320, "Guild workshop", palette.muted, "GameFontNormalSmall")
     Block(ui, 600, 22, 134, 32, palette.inset)
     Block(ui, 612, 34, 5, 5, palette.mint)
     ui.members = Label(ui, 625, 32, 103, "", palette.mint, "GameFontNormalSmall")
@@ -756,8 +809,13 @@ local function CreateUI()
     ui.detailBody:SetHeight(68)
     ui.detailAction = Button(ui, 608, 291, 122, 27, "", nil)
     ui.altAction = Button(ui, 738, 291, 122, 27, "", nil)
+    ui.contribution = Input(ui, 608, 325, 92, 5)
+    ui.contribution:SetNumeric(true)
+    ui.contribution:SetAltArrowKeyMode(false)
+    local contributionLabel = Label(ui.contribution, 104, 7, 140, "Contribution quantity", palette.muted)
+    contributionLabel:SetWordWrap(false)
 
-    ui.form = Place(CreateFrame("Frame", nil, ui), 608, 331, 252, 215)
+    ui.form = Place(CreateFrame("Frame", nil, ui), 608, 358, 252, 190)
     Block(ui.form, 0, 0, 250, 1, palette.border)
     Label(ui.form, 0, 12, 250, "POST OR UPDATE A REQUEST", palette.gold, "GameFontNormalSmall")
     Label(ui.form, 0, 33, 170, "Item link or ID", palette.text)
@@ -776,7 +834,12 @@ local function CreateUI()
     ui.item:SetScript("OnTextChanged", ui.UpdateItemPreview)
     Label(ui.form, 0, 109, 250, "Note (optional)", palette.text)
     ui.note = Input(ui.form, 0, 126, 250, 80)
-    ui.requestSave = Button(ui.form, 0, 171, 250, 34, "Post request", function()
+    ui.item:HookScript("OnEditFocusGained", function() ui.itemLinkArmed = true end)
+    ui.item:HookScript("OnEscapePressed", function() ui.itemLinkArmed = nil end)
+    for _, field in ipairs({ ui.quantity, ui.note, ui.search, ui.contribution }) do
+        field:HookScript("OnEditFocusGained", function() ui.itemLinkArmed = nil end)
+    end
+    ui.requestSave = Button(ui.form, 0, 157, 250, 31, "Post request", function()
         local id, message = ns.SaveRequest(ui.item:GetText(), ui.quantity:GetText(), ui.note:GetText())
         if id then
             ResetRequest()
@@ -796,11 +859,17 @@ local function CreateUI()
     end
     ui.item:SetScript("OnReceiveDrag", DropItem)
     ui.item:SetScript("OnMouseDown", DropItem)
+    local function ReceiveItemLink(link)
+        if not ui.item:IsVisible() or not (ui.itemLinkArmed or ui.item:HasFocus()) then return end
+        local id = ns.ItemID(link)
+        if id then ui.item:SetText(tostring(id)) end
+    end
     if ChatFrameUtil and ChatFrameUtil.InsertLink then
-        hooksecurefunc(ChatFrameUtil, "InsertLink", function(link)
-            if not ui.item:IsVisible() or not ui.item:HasFocus() then return end
-            local id = ns.ItemID(link)
-            if id then ui.item:SetText(tostring(id)) end
+        hooksecurefunc(ChatFrameUtil, "InsertLink", ReceiveItemLink)
+    end
+    if HandleModifiedItemClick then
+        hooksecurefunc("HandleModifiedItemClick", function(link)
+            if IsModifiedClick("CHATLINK") then ReceiveItemLink(link) end
         end)
     end
     ResetRequest()
@@ -808,6 +877,7 @@ local function CreateUI()
     Block(ui, 1, 566, WIDTH - 2, 1, palette.border)
     ui.status = Label(ui, 20, 574, 860, "", palette.muted, "GameFontNormalSmall")
     ui:SetScript("OnHide", function()
+        ui.itemLinkArmed = nil
         GameTooltip:Hide()
         CloseCatalog()
         CloseRecipeSearch()
@@ -859,7 +929,7 @@ function ns.CreateLauncher()
     launcher:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", x or -236, y or -155)
     Block(launcher, 0, 0, 133, 1, palette.gold)
     Block(launcher, 6, 6, 24, 24, palette.gold)
-    Icon(launcher, 7, 7, 22, icons.craft)
+    Icon(launcher, 7, 7, 22, logo)
     launcher.label:ClearAllPoints()
     launcher.label:SetPoint("LEFT", 38, 0)
     launcher.label:SetTextColor(unpack(palette.gold))

@@ -7,6 +7,7 @@ ns.MAX_PROFESSIONS = 7
 ns.CACHE_AGE = 14 * 86400
 ns.bnetPeers = {}
 local needsByItem = {}
+local contributionsByTicket = {}
 local peerRefresh
 local events = CreateFrame("Frame")
 
@@ -62,14 +63,35 @@ end
 
 function ns.Reindex()
     wipe(needsByItem)
+    wipe(contributionsByTicket)
+    local function AddContributions(entries)
+        for ticket, entry in pairs(entries or {}) do
+            local total = contributionsByTicket[ticket]
+            if not total then
+                total = { pledged = 0, delivered = 0 }
+                contributionsByTicket[ticket] = total
+            end
+            total.pledged = total.pledged + entry.pledged
+            total.delivered = total.delivered + entry.delivered
+        end
+    end
+    AddContributions(ns.db.contributions)
+    for key in ns.PeerKeys() do
+        local peer = ns.Peer(key)
+        if peer then AddContributions(peer.contributions) end
+    end
     for key in ns.PeerKeys() do
         local peer = ns.Peer(key)
         if peer then
             local address = ns.Contact(key)
             for id, request in pairs(peer.requests) do
-                local needs = needsByItem[id] or {}
-                needsByItem[id] = needs
-                needs[#needs + 1] = { key = key, name = address, quantity = request.quantity, seen = peer.seen }
+                local _, delivered = ns.ContributionTotals(request.ticket)
+                local remaining = request.quantity - delivered
+                if remaining > 0 then
+                    local needs = needsByItem[id] or {}
+                    needsByItem[id] = needs
+                    needs[#needs + 1] = { key = key, name = address, quantity = remaining, seen = peer.seen }
+                end
             end
         end
     end
@@ -142,9 +164,44 @@ function ns.SaveRequest(input, quantity, note)
         for _ in pairs(ns.db.requests) do count = count + 1 end
         if count >= ns.MAX_REQUESTS then return nil, "Close a request before adding more." end
     end
-    ns.db.requests[id] = { quantity = quantity, note = ns.Text(note, 80) }
+    local previous = ns.db.requests[id]
+    ns.db.requests[id] = { quantity = quantity, note = ns.Text(note, 80),
+        ticket = previous and previous.ticket or ns.NewRequestTicket() }
     ns.LocalChanged()
     return id, "Request saved."
+end
+
+function ns.NewRequestTicket()
+    return ("%08x%06x"):format(GetServerTime(), math.random(0, 16777215))
+end
+
+function ns.ContributionTotals(ticket)
+    local total = ticket and contributionsByTicket[ticket]
+    if total then return total.pledged, total.delivered end
+    return 0, 0
+end
+
+function ns.Contribute(ticket, amount, delivery)
+    local entries = ns.db.contributions
+    local entry = entries[ticket]
+    if not entry then
+        local count, oldestTicket, oldestTime = 0, nil, math.huge
+        for key, value in pairs(entries) do
+            count = count + 1
+            if value.time < oldestTime then oldestTicket, oldestTime = key, value.time end
+        end
+        if count >= 24 then entries[oldestTicket] = nil end
+        entry = { pledged = 0, delivered = 0 }
+        entries[ticket] = entry
+    end
+    if delivery then
+        entry.delivered = math.min(99999, entry.delivered + amount)
+        entry.pledged = math.max(0, entry.pledged - amount)
+    else
+        entry.pledged = amount
+    end
+    entry.time = GetServerTime()
+    ns.LocalChanged()
 end
 
 function ns.CloseRequest(id)
@@ -153,6 +210,7 @@ function ns.CloseRequest(id)
 end
 
 function ns.LocalChanged()
+    ns.Reindex()
     ns.Changed()
     ns.Publish()
 end
@@ -187,10 +245,13 @@ end
 local function Init()
     CraftCircleDB = CraftCircleDB or {}
     ns.db = CraftCircleDB
-    for _, key in ipairs({ "requests", "peers", "recipes", "bnetPeers", "catalogs" }) do
+    for _, key in ipairs({ "requests", "peers", "recipes", "bnetPeers", "catalogs", "contributions", "observed" }) do
         if type(ns.db[key]) ~= "table" then ns.db[key] = {} end
     end
     ns.bnetPeers = ns.db.bnetPeers
+    for _, request in pairs(ns.db.requests) do
+        request.ticket = request.ticket or ns.NewRequestTicket()
+    end
     ns.selfKey, ns.selfName = ns.Character(UnitFullName("player"))
     if ns.db.identityVersion ~= 2 then
         ns.db.identityVersion = 2
