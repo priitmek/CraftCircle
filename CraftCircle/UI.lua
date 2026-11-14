@@ -13,6 +13,7 @@ local tabs = {
     { "Requests", "Request board", "Items your circle is looking for." },
     { "Crafters", "Crafter directory", "Find a profession or browse shared recipes." },
     { "My Circle", "My circle", "See your friends, guildmates, and their sync status." },
+    { "BoE Gear", "BoE gear in your bags", "Select an item to see who might benefit from it." },
 }
 local ROWS, WIDTH, HEIGHT = 7, 900, 590
 local ui, tab, page, selected, recipeView, recipeSearch = nil, 1, 1, nil, nil, nil
@@ -103,22 +104,26 @@ local function ItemName(id)
     return C_Item.GetItemInfo(id) or ("Item #" .. id)
 end
 
+local function RequestItem(id)
+    if not itemLoads[id] and C_Item.DoesItemExistByID(id) then
+        itemLoads[id] = true
+        C_Item.RequestLoadItemDataByID(id)
+    end
+end
+
 local function ItemIcon(id)
     local icon = C_Item.GetItemIconByID(id)
     if not icon or icon == 0 then icon = select(5, C_Item.GetItemInfoInstant(id)) end
     if not icon or icon == 0 then icon = select(10, C_Item.GetItemInfo(id)) end
     if icon and icon ~= 0 then return icon end
-    if not itemLoads[id] and C_Item.DoesItemExistByID(id) then
-        itemLoads[id] = true
-        C_Item.RequestLoadItemDataByID(id)
-    end
+    RequestItem(id)
     return fallbackIcon
 end
 
-local function ItemTooltip(owner, id)
+local function ItemTooltip(owner, id, link)
     if not id then return end
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
-    GameTooltip:SetHyperlink("item:" .. id)
+    GameTooltip:SetHyperlink(link or ("item:" .. id))
     GameTooltip:Show()
 end
 
@@ -208,15 +213,26 @@ local function BuildRows(query)
             local peer = ns.Peer(key)
             if peer then AddProfessions(key, ns.Contact(key), peer.professions) end
         end
+    elseif tab == 4 then
+        for _, item in ipairs(ns.BagBoEs(RequestItem)) do
+            local names = {}
+            for _, match in ipairs(item.matches) do names[#names + 1] = match.name end
+            if query == "" or Match(item.name .. " " .. table.concat(names, " "), query) then
+                entries[#entries + 1] = { key = item.link, id = item.id, link = item.link,
+                    title = item.name, detail = #names > 0 and table.concat(names, ", ") or "No known upgrades",
+                    badge = item.level .. " ilvl", matches = item.matches }
+            end
+        end
     else
         local function AddContact(key)
             local address = ns.Contact(key)
             if address and (query == "" or Match(address, query)) then
                 local peer = ns.Peer(key)
                 local shareable = ns.SyncContact(key)
+                local cached = peer and ns.ContactOffline(key)
                 entries[#entries + 1] = { key = key, title = address, shareable = shareable,
-                    detail = ns.ContactKind(key) .. (shareable and "  /  " .. Age(peer) or ""),
-                    badge = peer and "SYNCED" or shareable and "NOT SYNCED" or "ROSTER ONLY" }
+                    detail = ns.ContactKind(key) .. ((shareable or peer) and "  /  " .. Age(peer) or ""),
+                    badge = cached and "OFFLINE · CACHED" or peer and "SYNCED" or shareable and "NOT SYNCED" or "ROSTER ONLY" }
             end
         end
         for key in pairs(ns.friends) do AddContact(key) end
@@ -225,6 +241,9 @@ local function BuildRows(query)
         end
         for key in pairs(ns.bnet) do
             if not ns.SharedGuildKey(key) then AddContact(key) end
+        end
+        for key in pairs(ns.bnetPeers) do
+            if not ns.bnet[key] and ns.Peer(key) then AddContact(key) end
         end
     end
     table.sort(entries, function(a, b)
@@ -241,6 +260,8 @@ local function OpenRecipes(entry)
     ui.search:SetText("")
     if entry.owner == ns.selfKey then
         recipeView.recipes = ns.DecodeRecipes(ns.db.recipes[profession.id].payload)
+    elseif ns.ContactOffline(entry.owner) then
+        recipeView.error = "This crafter is offline. Open their catalog when they return."
     elseif not ns.RequestRecipes(entry.owner, profession.id) then
         recipeView.error = "Try loading the catalog again in a few seconds."
     end
@@ -362,6 +383,18 @@ local function RenderDetail(entry)
                 DetailAction(ui.detailAction, "Browse recipes", function() OpenRecipes(entry) end)
             end
         end
+    elseif tab == 4 then
+        local lines = {}
+        if entry then
+            for index = 1, math.min(3, #entry.matches) do
+                local match = entry.matches[index]
+                lines[#lines + 1] = match.name .. "  +" .. match.delta .. " ilvl" .. (match.cached and " (cached)" or "")
+            end
+            if #entry.matches > 3 then lines[#lines + 1] = "+" .. (#entry.matches - 3) .. " more on hover" end
+        end
+        SetDetail("POTENTIAL UPGRADES", entry and entry.title or "Choose an item",
+            #lines > 0 and table.concat(lines, "\n") or entry and "No upgrades found in synced gear."
+            or "Unbound BoE gear in your bags appears here.")
     else
         local friends, guild = ns.ContactCounts()
         local battleNet = 0
@@ -431,6 +464,8 @@ Render = function()
             empty = "No active requests yet.\nPost an item or sync with your friends."
         elseif tab == 2 then
             empty = "No professions to display yet.\nLearn a profession or sync with a friend."
+        elseif tab == 4 then
+            empty = "No unbound BoE gear found in your bags."
         else
             empty = "No contacts found.\nClick Sync to refresh the game rosters."
         end
@@ -443,7 +478,7 @@ Render = function()
     ui.listCount:SetShown(not canFind)
     ui.searchHint:SetText(canFind and "Search crafters or type a recipe name" or "Search this view")
     ui.listCount:SetText(#entries .. (recipeView and " RECIPES" or tab == 1 and " REQUESTS" or
-        tab == 2 and " PROFESSIONS" or " CONTACTS"))
+        tab == 2 and " PROFESSIONS" or tab == 4 and " ITEMS" or " CONTACTS"))
     ui.page:SetText(page .. " / " .. pages)
     ui.prev:SetEnabled(page > 1)
     ui.next:SetEnabled(page < pages)
@@ -520,7 +555,7 @@ local function CreateUI()
         button.indicator = Block(button, 0, 32, 118, 2, palette.gold)
         ui.tabs[index] = button
     end
-    ui.back = Button(ui, 404, 87, 164, 34, "Back to professions", function() SelectTab(2) end)
+    ui.back = Button(ui, 716, 87, 164, 34, "Back to professions", function() SelectTab(2) end)
     ui.back:Hide()
 
     Block(ui, 20, 135, 548, 422, palette.side)
@@ -573,7 +608,7 @@ local function CreateUI()
         end)
         row:SetScript("OnEnter", function(self)
             if self.entry.id or self.entry.outputItem then
-                ItemTooltip(self, self.entry.id or self.entry.outputItem)
+                ItemTooltip(self, self.entry.id or self.entry.outputItem, self.entry.link)
             elseif self.entry.spell then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetSpellByID(self.entry.spell)
@@ -747,12 +782,17 @@ refresh:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 refresh:RegisterEvent("ITEM_DATA_LOAD_RESULT")
 refresh:RegisterEvent("SPELL_DATA_LOAD_RESULT")
 refresh:RegisterEvent("UI_SCALE_CHANGED")
+refresh:RegisterEvent("BAG_UPDATE_DELAYED")
 local redraw
 refresh:SetScript("OnEvent", function(_, event, id, succeeded)
     if not ui or not ui:IsShown() then return end
     if event == "UI_SCALE_CHANGED" then Fit(); return end
-    if not succeeded then return end
-    if event ~= "SPELL_DATA_LOAD_RESULT" and ns.ItemID(ui.item:GetText()) == id then ui.UpdateItemPreview() end
+    if event == "BAG_UPDATE_DELAYED" then
+        if tab ~= 4 then return end
+    else
+        if not succeeded then return end
+        if event ~= "SPELL_DATA_LOAD_RESULT" and ns.ItemID(ui.item:GetText()) == id then ui.UpdateItemPreview() end
+    end
     if redraw then return end
     redraw = C_Timer.NewTimer(0.1, function() redraw = nil; Render() end)
 end)

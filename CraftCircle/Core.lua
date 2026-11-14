@@ -39,7 +39,7 @@ end
 
 function ns.Peer(key)
     local battleNet = ns.bnetPeers[key]
-    if battleNet and ns.BattleNetContact(key) then
+    if battleNet and battleNet.seen > GetServerTime() - ns.CACHE_AGE and ns.KnownBattleNetContact(key) then
         local guildKey = ns.SharedGuildKey(key)
         if not guildKey or not ns.Peer(guildKey) then return battleNet end
     end
@@ -80,6 +80,22 @@ end
 
 function ns.StorePeer(key, snapshot)
     local cache = snapshot.guild and ns.db.peers or ns.bnetPeers
+    if not snapshot.guild then
+        local contact = ns.BattleNetContact(key)
+        if not contact then return end
+        snapshot.contact = { tag = contact.tag, character = contact.character, address = contact.address,
+            guid = contact.guid, realm = contact.realm }
+        if contact.tag then
+            for oldKey, old in pairs(cache) do
+                local saved = old.contact
+                if oldKey ~= key and saved and saved.tag == contact.tag and saved.character == contact.character
+                    and saved.realm == contact.realm then
+                    cache[oldKey] = nil
+                    ns.ForgetGear(oldKey)
+                end
+            end
+        end
+    end
     if not cache[key] then
         local count, oldestKey, oldest = 0, nil, math.huge
         for peerKey, peer in pairs(cache) do
@@ -90,6 +106,10 @@ function ns.StorePeer(key, snapshot)
     end
     snapshot.seen = GetServerTime()
     cache[key] = snapshot
+    ns.QueuePeerRefresh()
+end
+
+function ns.QueuePeerRefresh()
     if peerRefresh then return end
     peerRefresh = C_Timer.NewTimer(0.35, function()
         peerRefresh = nil
@@ -137,13 +157,13 @@ local function AddItemNeeds(tooltip, data)
     if not needs then return end
     local now, shown, remaining = GetServerTime(), 0, 0
     for _, need in ipairs(needs) do
-        if now - need.seen < ns.CACHE_AGE and ns.SyncContact(need.key) then
+        if now - need.seen < ns.CACHE_AGE and ns.Peer(need.key) then
             if shown < 4 then
                 if shown == 0 then
                     tooltip:AddLine(" ")
                     tooltip:AddLine("CraftCircle  |  Requested by", 0.94, 0.77, 0.44)
                 end
-                local cached = now - need.seen >= 86400 and "  (cached)" or ""
+                local cached = (ns.ContactOffline(need.key) or now - need.seen >= 86400) and "  (cached)" or ""
                 tooltip:AddDoubleLine(need.name .. cached, "x" .. need.quantity, 0.84, 0.91, 0.86, 0.76, 0.94, 0.79)
                 shown = shown + 1
             else
@@ -159,9 +179,10 @@ end
 local function Init()
     CraftCircleDB = CraftCircleDB or {}
     ns.db = CraftCircleDB
-    for _, key in ipairs({ "requests", "peers", "recipes" }) do
+    for _, key in ipairs({ "requests", "peers", "recipes", "bnetPeers" }) do
         if type(ns.db[key]) ~= "table" then ns.db[key] = {} end
     end
+    ns.bnetPeers = ns.db.bnetPeers
     ns.selfKey, ns.selfName = ns.Character(UnitFullName("player"))
     if ns.db.identityVersion ~= 2 then
         ns.db.identityVersion = 2

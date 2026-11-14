@@ -17,7 +17,9 @@ Select your own request to edit or close it. When a matching item tooltip opens 
 
 ## BoE gear upgrades
 
-Bind-on-equip gear tooltips show potential item-level upgrades for guildmates and Battle.net friends running CraftCircle 1.5.0 or later. CraftCircle shares your character level and equipped slot item levels and types through its existing addon-data channels. Comparisons use equipment synced in the last 30 minutes. They account for character level and comparable slots and gear types, while stats, effects, and build preferences need a manual check.
+Open **BoE Gear** to see unbound bind-on-equip equipment in your bags. Select an item to see who might benefit and their potential item-level gain. Item tooltips show the same comparisons.
+
+CraftCircle shares character level and equipped item levels and types through its existing addon-data channels. Comparisons use gear synced in the last seven days, including cached gear for offline contacts. Stats, effects, and build preferences need a manual check.
 
 ## Share recipes
 
@@ -30,7 +32,7 @@ To search across crafters, type at least three characters of a recipe name or it
 ## Sync and resource use
 
 - Board and recipe data use the guild addon channel or Battle.net's separate addon-data API. CraftCircle sends no chat messages or chat whispers. WoW internally labels incoming Battle.net addon data `WHISPER`. Sync may pause in restricted content.
-- Guild requests and profiles remain cached per character for up to 14 days while the sender is still a guildmate. Battle.net profiles stay in memory while the friend is online in WoW. Each source is capped at 96 profiles. An offline contact's closed or changed request updates after the next successful sync.
+- Guild and Battle.net requests and profession summaries remain cached for up to 14 days while the sender is still in your circle. **My Circle** labels offline contacts with saved data **Offline · Cached**. Full recipe catalogs load when the crafter is online. Each source is capped at 96 profiles.
 - CraftCircle creates the window on first open and reuses seven list rows. It has no external libraries, bundled media, or per-frame polling. Each character can post up to 20 active requests. Local catalogs store up to 1,600 recipe IDs per profession. Only the catalog being viewed is kept in memory on the receiving client.
 
 The Forever social, profession, and messaging APIs were checked against the mirrored [Forever 1.60.1.70862 UI source](https://github.com/Gethe/wow-ui-source/tree/9dc84f0d3bbae1768ac3405b3716000bd93eda06). Native rendering, live message delivery, and in-game memory use still need a live-client check.

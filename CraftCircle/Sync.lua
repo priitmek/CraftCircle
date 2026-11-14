@@ -279,7 +279,7 @@ function ns.Publish()
 end
 
 function ns.ForgetSync(key)
-    ns.ForgetGear(key)
+    if not ns.bnetPeers[key] then ns.ForgetGear(key) end
     ns.CancelRecipeRequest(key)
     boardTransfers[key], lastCatalogReply[key] = nil, nil
     lastBattleNetQuery[key], lastBattleNetReply[key], battleNetDirty[key] = nil, nil, nil
