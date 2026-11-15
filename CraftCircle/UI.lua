@@ -1,12 +1,13 @@
 local _, ns = ...
 
 local palette = {
-    base = { 0.045, 0.062, 0.085 }, side = { 0.078, 0.105, 0.140 },
-    surface = { 0.110, 0.144, 0.187 }, alternate = { 0.091, 0.120, 0.158 },
-    hover = { 0.156, 0.223, 0.262 }, inset = { 0.054, 0.077, 0.106 },
-    border = { 0.25, 0.31, 0.38 }, copper = { 0.54, 0.39, 0.25 }, text = { 0.98, 0.94, 0.87 },
-    muted = { 0.69, 0.76, 0.83 }, gold = { 1.00, 0.78, 0.48 },
-    mint = { 0.61, 0.88, 0.79 }, dark = { 0.13, 0.086, 0.055 },
+    base = { 0.039, 0.065, 0.084 }, side = { 0.070, 0.112, 0.138 },
+    surface = { 0.110, 0.158, 0.185 }, alternate = { 0.087, 0.130, 0.157 },
+    hover = { 0.121, 0.231, 0.237 }, inset = { 0.045, 0.080, 0.105 },
+    border = { 0.22, 0.33, 0.36 }, jade = { 0.32, 0.69, 0.58 },
+    text = { 0.98, 0.95, 0.88 }, muted = { 0.71, 0.80, 0.84 },
+    gold = { 1.00, 0.80, 0.54 }, mint = { 0.68, 0.94, 0.84 }, dark = { 0.028, 0.11, 0.095 },
+    shadow = { 0, 0, 0, 0.35 }, rim = { 0.76, 0.96, 0.88, 0.14 },
     danger = { 1, 0.60, 0.54 },
 }
 local tabs = {
@@ -24,7 +25,8 @@ local fallbackIcon = "Interface/Icons/INV_Misc_QuestionMark"
 local itemLoads = {}
 local icons = { request = 133784, circle = 133452, craft = 136241, recipe = "Interface/Icons/INV_Scroll_03" }
 local logo = "Interface/AddOns/CraftCircle/Art/Logo"
-local readingFont = "Fonts/ARIALN.TTF"
+local regularFont = "Interface/AddOns/CraftCircle/Art/Fonts/Atkinson-Regular.ttf"
+local semiboldFont = "Interface/AddOns/CraftCircle/Art/Fonts/Atkinson-Semibold.ttf"
 
 local function Place(region, x, y, width, height)
     region:SetPoint("TOPLEFT", x, -y)
@@ -36,8 +38,8 @@ local function Paint(texture, color)
     texture:SetColorTexture(unpack(color))
 end
 
-local function Block(parent, x, y, width, height, color)
-    local texture = Place(parent:CreateTexture(nil, "BACKGROUND", nil, 1), x, y, width, height)
+local function Block(parent, x, y, width, height, color, layer)
+    local texture = Place(parent:CreateTexture(nil, "BACKGROUND", nil, layer or 1), x, y, width, height)
     Paint(texture, color)
     return texture
 end
@@ -49,8 +51,9 @@ local function Label(parent, x, y, width, text, color, font, wrap)
     label:SetJustifyV("TOP")
     label:SetWordWrap(wrap == true)
     label:SetTextColor(unpack(color or palette.text))
-    local size = font == "GameFontHighlightLarge" and 19 or font == "GameFontNormalSmall" and 13 or 15
-    label:SetFont(readingFont, size, "")
+    local large = font == "GameFontHighlightLarge"
+    local size = large and 20 or font == "GameFontNormalSmall" and 13 or 15
+    label:SetFont((large or (font == "GameFontHighlight" and not wrap)) and semiboldFont or regularFont, size, "")
     label:SetText(text)
     return label
 end
@@ -62,22 +65,51 @@ local function Icon(parent, x, y, size, texture)
     return image
 end
 
-local function Gradient(texture, startColor, endColor)
+local function Gradient(texture, startColor, endColor, orientation)
     texture:SetTexture("Interface/Buttons/WHITE8X8")
-    texture:SetGradient("HORIZONTAL", CreateColor(unpack(startColor)), CreateColor(unpack(endColor)))
+    texture:SetGradient(orientation or "HORIZONTAL", CreateColor(unpack(startColor)), CreateColor(unpack(endColor)))
+end
+
+local function Panel(parent, x, y, width, height)
+    Block(parent, x - 2, y + 2, width + 4, height + 3, palette.shadow, 0)
+    Block(parent, x, y, width, height, palette.side)
+    local wash = Block(parent, x, y, width, 84, palette.side, 2)
+    Gradient(wash, { 0.33, 0.60, 0.55, 0 }, { 0.33, 0.60, 0.55, 0.13 }, "VERTICAL")
+    Block(parent, x, y, width, 1, palette.border, 3)
+end
+
+local function Fade(region, from, duration)
+    local group = region:CreateAnimationGroup()
+    local alpha = group:CreateAnimation("Alpha")
+    alpha:SetFromAlpha(from)
+    alpha:SetToAlpha(1)
+    alpha:SetDuration(duration)
+    alpha:SetSmoothing("OUT")
+    return group
+end
+
+local function PlayMotion(group)
+    group:Stop()
+    if not ns.db.reduceMotion then group:Play() end
 end
 
 local function Button(parent, x, y, width, height, title, handler, primary)
     local button = Place(CreateFrame("Button", nil, parent), x, y, width, height)
-    button.fill = Block(button, 0, 0, width, height, primary and palette.gold or palette.surface)
-    Block(button, 0, 0, width, 1, primary and palette.text or palette.border)
+    Block(button, 0, 2, width, height, palette.shadow, 0)
+    button.fill = Block(button, 0, 0, width, height, primary and palette.mint or palette.surface)
+    Block(button, 0, height - 1, width, 1, palette.shadow, 2)
+    Block(button, 0, 0, width, 1, palette.rim, 2)
     local glow = button:CreateTexture(nil, "HIGHLIGHT")
     glow:SetAllPoints()
     glow:SetColorTexture(1, 1, 1, 0.12)
     button:SetHighlightTexture(glow)
+    local pressed = button:CreateTexture(nil, "ARTWORK")
+    pressed:SetAllPoints()
+    pressed:SetColorTexture(0, 0, 0, 0.18)
+    button:SetPushedTexture(pressed)
     local label = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     label:SetPoint("CENTER")
-    label:SetFont(readingFont, 14, "")
+    label:SetFont(semiboldFont, 14, "")
     label:SetTextColor(unpack(primary and palette.dark or palette.text))
     label:SetText(title)
     button.label = label
@@ -90,11 +122,11 @@ local function Input(parent, x, y, width, maxLetters)
     field:SetBackdrop({ bgFile = "Interface/Buttons/WHITE8X8", edgeFile = "Interface/Buttons/WHITE8X8", edgeSize = 1 })
     field:SetBackdropColor(unpack(palette.base))
     field:SetBackdropBorderColor(unpack(palette.border))
-    field:SetFont(readingFont, 15, "")
+    field:SetFont(regularFont, 15, "")
     field:SetTextInsets(9, 9, 0, 0)
     field:SetAutoFocus(false)
     field:SetMaxLetters(maxLetters)
-    field:SetScript("OnEditFocusGained", function(self) self:SetBackdropBorderColor(unpack(palette.gold)) end)
+    field:SetScript("OnEditFocusGained", function(self) self:SetBackdropBorderColor(unpack(palette.jade)) end)
     field:SetScript("OnEditFocusLost", function(self) self:SetBackdropBorderColor(unpack(palette.border)) end)
     field:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     field:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
@@ -644,6 +676,7 @@ Render = function()
 end
 
 SelectTab = function(index)
+    local changed = tab ~= index
     ui.itemLinkArmed = nil
     CloseCatalog()
     CloseRecipeSearch()
@@ -652,42 +685,47 @@ SelectTab = function(index)
     ui.search:ClearFocus()
     for i, button in ipairs(ui.tabs) do
         Paint(button.fill, i == tab and palette.hover or palette.surface)
-        button.label:SetTextColor(unpack(i == tab and palette.gold or palette.text))
+        button.label:SetTextColor(unpack(i == tab and palette.mint or palette.text))
         button.indicator:SetShown(i == tab)
     end
     Render()
+    if changed then PlayMotion(ui.tabs[index].indicatorFade) end
 end
 
 local function CreateUI()
-    ui = CreateFrame("Frame", "CraftCircleWindow", UIParent, "BackdropTemplate")
+    ui = CreateFrame("Frame", "CraftCircleWindow", UIParent)
     ui:SetSize(WIDTH, HEIGHT)
     ui:SetPoint("CENTER")
     ui:SetFrameStrata("DIALOG")
     ui:SetClampedToScreen(true)
     ui:SetMovable(true)
     ui:EnableMouse(true)
-    ui:SetBackdrop({ bgFile = "Interface/Buttons/WHITE8X8", edgeFile = "Interface/Buttons/WHITE8X8", edgeSize = 1 })
-    ui:SetBackdropColor(unpack(palette.base))
-    ui:SetBackdropBorderColor(unpack(palette.border))
     ui:Hide()
     table.insert(UISpecialFrames, "CraftCircleWindow")
+
+    Block(ui, -6, 2, WIDTH + 12, HEIGHT + 10, { 0, 0, 0, 0.20 }, -5)
+    Block(ui, -2, 2, WIDTH + 4, HEIGHT + 4, palette.shadow, -4)
+    Block(ui, 0, 0, WIDTH, HEIGHT, palette.border, -3)
+    Block(ui, 1, 1, WIDTH - 2, HEIGHT - 2, palette.base, -2)
+    ui.openFade = Fade(ui, 0.66, 0.17)
 
     local drag = Place(CreateFrame("Frame", nil, ui), 0, 0, 570, 73)
     drag:EnableMouse(true)
     drag:RegisterForDrag("LeftButton")
     drag:SetScript("OnDragStart", function() ui:StartMoving() end)
     drag:SetScript("OnDragStop", function() ui:StopMovingOrSizing() end)
-    local hero = Block(ui, 1, 1, WIDTH - 2, 73, palette.surface)
-    Gradient(hero, { 0.172, 0.211, 0.272, 1 }, { 0.063, 0.087, 0.120, 1 })
-    Block(ui, 1, 1, WIDTH - 2, 2, palette.copper)
-    Block(ui, 20, 13, 49, 49, palette.copper)
-    Block(ui, 22, 15, 45, 45, palette.inset)
-    Icon(ui, 22, 15, 45, logo)
-    local brand = Label(ui, 84, 14, 360, "CraftCircle", palette.text, "GameFontHighlightLarge")
-    brand:SetFont(readingFont, 25, "")
-    Label(ui, 86, 48, 320, "Guild workshop", palette.muted, "GameFontNormalSmall")
-    Block(ui, 600, 22, 134, 32, palette.inset)
-    Block(ui, 612, 34, 5, 5, palette.mint)
+    local hero = Block(ui, 1, 1, WIDTH - 2, 73, palette.surface, 2)
+    Gradient(hero, { 0.106, 0.230, 0.227, 1 }, { 0.052, 0.084, 0.115, 1 })
+    local trim = Block(ui, 1, 1, WIDTH - 2, 2, palette.jade, 3)
+    Gradient(trim, { 0.42, 0.83, 0.67, 1 }, { 0.15, 0.25, 0.29, 1 })
+    Block(ui, 20, 13, 49, 49, palette.border, 3)
+    Block(ui, 21, 14, 47, 47, palette.inset, 4)
+    Icon(ui, 22, 15, 45, logo):SetTexCoord(0, 1, 0, 1)
+    local brand = Label(ui, 83, 20, 360, "CraftCircle", palette.text, "GameFontHighlightLarge")
+    brand:SetFont(semiboldFont, 29, "")
+    Block(ui, 599, 21, 136, 34, palette.border, 3)
+    Block(ui, 600, 22, 134, 32, palette.inset, 4)
+    Block(ui, 612, 35, 5, 5, palette.mint, 5)
     ui.members = Label(ui, 625, 32, 103, "", palette.mint, "GameFontNormalSmall")
     Button(ui, 747, 21, 92, 34, "Sync", function() Status(ns.RefreshContacts()) end, true)
     Button(ui, 849, 21, 30, 34, "X", function() ui:Hide() end)
@@ -697,7 +735,8 @@ local function CreateUI()
     for index, definition in ipairs(tabs) do
         local button = Button(ui, 20 + (index - 1) * 128, 87, 118, 34, definition[1],
             function() SelectTab(index) end)
-        button.indicator = Block(button, 0, 32, 118, 2, palette.gold)
+        button.indicator = Block(button, 8, 32, 102, 2, palette.jade, 3)
+        button.indicatorFade = Fade(button.indicator, 0.2, 0.15)
         ui.tabs[index] = button
     end
     ui.back = Button(ui, 716, 87, 164, 34, "Back", function()
@@ -720,8 +759,7 @@ local function CreateUI()
         Render()
     end)
 
-    Block(ui, 20, 135, 548, 422, palette.side)
-    Block(ui, 20, 135, 548, 1, palette.border)
+    Panel(ui, 20, 135, 548, 422)
     ui.heading = Label(ui, 36, 151, 514, "", palette.text, "GameFontHighlightLarge")
     ui.subtitle = Label(ui, 36, 177, 514, "", palette.muted)
     ui.search = Input(ui, 36, 199, 336, 64)
@@ -739,9 +777,9 @@ local function CreateUI()
     ui.listCount:SetJustifyH("RIGHT")
     ui.emptyPlate = Place(CreateFrame("Frame", nil, ui), 36, 241, 516, 276)
     Block(ui.emptyPlate, 0, 0, 516, 276, palette.inset)
-    Block(ui.emptyPlate, 0, 0, 516, 1, palette.border)
-    Block(ui.emptyPlate, 233, 63, 50, 50, palette.copper)
-    Block(ui.emptyPlate, 234, 64, 48, 48, palette.side)
+    Block(ui.emptyPlate, 0, 0, 516, 1, palette.border, 2)
+    Block(ui.emptyPlate, 233, 63, 50, 50, palette.border, 2)
+    Block(ui.emptyPlate, 234, 64, 48, 48, palette.side, 3)
     ui.emptyIcon = Icon(ui.emptyPlate, 240, 70, 36, icons.request)
     ui.empty = Label(ui.emptyPlate, 24, 135, 468, "", palette.muted, "GameFontHighlight", true)
     ui.empty:SetJustifyH("CENTER")
@@ -750,24 +788,27 @@ local function CreateUI()
     for index = 1, ROWS do
         local row = Place(CreateFrame("Button", nil, ui), 36, 241 + (index - 1) * 40, 516, 36)
         row.fill = Block(row, 0, 0, 516, 36, palette.surface)
-        row.marker = Block(row, 0, 0, 2, 36, palette.gold)
+        Block(row, 0, 35, 516, 1, palette.shadow, 2)
+        row.marker = Block(row, 0, 4, 2, 28, palette.jade, 3)
         row.marker:Hide()
         row.iconFrame = Block(row, 8, 4, 28, 28, palette.border)
         row.icon = Icon(row, 9, 5, 26)
         row.contactDot = Block(row, 10, 15, 6, 6, palette.border)
         row.title = Label(row, 46, 4, 329, "", palette.text, "GameFontHighlight")
         row.detail = Label(row, 46, 20, 329, "", palette.muted, "GameFontNormalSmall")
-        row.badgeFill = Block(row, 390, 7, 116, 22, palette.inset)
-        row.badge = Label(row, 391, 12, 114, "", palette.mint, "GameFontNormalSmall")
+        row.badgeFill = Block(row, 384, 7, 122, 22, palette.inset, 2)
+        row.badge = Label(row, 385, 11, 120, "", palette.mint, "GameFontNormalSmall")
         row.badge:SetJustifyH("CENTER")
         local highlight = row:CreateTexture(nil, "HIGHLIGHT")
         highlight:SetAllPoints()
         highlight:SetColorTexture(1, 1, 1, 0.08)
         row:SetHighlightTexture(highlight)
         row:SetScript("OnClick", function(self)
+            local previous = selected
             if self.entry.group then OpenDirectoryGroup(self.entry); return end
             selected = self.entry.key
             Render()
+            if previous ~= selected then PlayMotion(ui.detailFade) end
         end)
         row:SetScript("OnEnter", function(self)
             if self.entry.id or self.entry.outputItem then
@@ -800,22 +841,24 @@ local function CreateUI()
         Status("Shared recipe catalogs cleared.")
     end)
 
-    Block(ui, 588, 135, 292, 422, palette.side)
-    Block(ui, 588, 135, 292, 2, palette.copper)
+    Panel(ui, 588, 135, 292, 422)
+    Block(ui, 608, 215, 252, 1, palette.border, 3)
     ui.kicker = Label(ui, 608, 153, 252, "", palette.gold, "GameFontNormalSmall")
     ui.detailTitle = Label(ui, 608, 177, 252, "", palette.text, "GameFontHighlightLarge", true)
     ui.detailTitle:SetHeight(36)
+    ui.detailFade = Fade(ui.detailTitle, 0.60, 0.14)
     ui.detailBody = Label(ui, 608, 220, 252, "", palette.muted, "GameFontHighlight", true)
-    ui.detailBody:SetHeight(68)
-    ui.detailAction = Button(ui, 608, 291, 122, 27, "", nil)
-    ui.altAction = Button(ui, 738, 291, 122, 27, "", nil)
-    ui.contribution = Input(ui, 608, 325, 92, 5)
+    ui.detailBody:SetFont(regularFont, 14, "")
+    ui.detailBody:SetHeight(76)
+    ui.detailAction = Button(ui, 608, 298, 122, 27, "", nil)
+    ui.altAction = Button(ui, 738, 298, 122, 27, "", nil)
+    ui.contribution = Input(ui, 608, 331, 92, 5)
     ui.contribution:SetNumeric(true)
     ui.contribution:SetAltArrowKeyMode(false)
-    local contributionLabel = Label(ui.contribution, 104, 7, 140, "Contribution quantity", palette.muted)
+    local contributionLabel = Label(ui.contribution, 104, 7, 148, "Contribution quantity", palette.muted)
     contributionLabel:SetWordWrap(false)
 
-    ui.form = Place(CreateFrame("Frame", nil, ui), 608, 358, 252, 190)
+    ui.form = Place(CreateFrame("Frame", nil, ui), 608, 365, 252, 190)
     Block(ui.form, 0, 0, 250, 1, palette.border)
     Label(ui.form, 0, 12, 250, "POST OR UPDATE A REQUEST", palette.gold, "GameFontNormalSmall")
     Label(ui.form, 0, 33, 170, "Item link or ID", palette.text)
@@ -877,6 +920,9 @@ local function CreateUI()
     Block(ui, 1, 566, WIDTH - 2, 1, palette.border)
     ui.status = Label(ui, 20, 574, 860, "", palette.muted, "GameFontNormalSmall")
     ui:SetScript("OnHide", function()
+        ui.openFade:Stop()
+        ui.detailFade:Stop()
+        for _, button in ipairs(ui.tabs) do button.indicatorFade:Stop() end
         ui.itemLinkArmed = nil
         GameTooltip:Hide()
         CloseCatalog()
@@ -911,6 +957,7 @@ function ns.Toggle()
     ns.RefreshProfessions()
     ui:Show()
     SelectTab(tab)
+    PlayMotion(ui.openFade)
     Status(ns.RefreshContacts())
 end
 
@@ -927,12 +974,12 @@ function ns.CreateLauncher()
     local x = type(saved) == "table" and tonumber(saved.x)
     local y = type(saved) == "table" and tonumber(saved.y)
     launcher:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", x or -236, y or -155)
-    Block(launcher, 0, 0, 133, 1, palette.gold)
-    Block(launcher, 6, 6, 24, 24, palette.gold)
-    Icon(launcher, 7, 7, 22, logo)
+    Block(launcher, 0, 0, 133, 1, palette.jade, 3)
+    Block(launcher, 5, 5, 26, 26, palette.inset, 3)
+    Icon(launcher, 6, 6, 24, logo):SetTexCoord(0, 1, 0, 1)
     launcher.label:ClearAllPoints()
     launcher.label:SetPoint("LEFT", 38, 0)
-    launcher.label:SetTextColor(unpack(palette.gold))
+    launcher.label:SetTextColor(unpack(palette.mint))
     launcher:RegisterForDrag("LeftButton")
     launcher:SetScript("OnDragStart", function(self)
         GameTooltip:Hide()

@@ -288,9 +288,13 @@ SLASH_CRAFTCIRCLE1 = "/craftcircle"
 SLASH_CRAFTCIRCLE2 = "/ccircle"
 SlashCmdList.CRAFTCIRCLE = function(command)
     if not ns.db then return end
-    if strlower(ns.Text(command, 20)) == "scan" then
+    local action = strlower(ns.Text(command, 20))
+    if action == "scan" then
         local _, message = ns.CaptureRecipes()
         print("|cfff0c470CraftCircle|r  " .. message)
+    elseif action == "motion" then
+        ns.db.reduceMotion = not ns.db.reduceMotion
+        print("|cfff0c470CraftCircle|r  Animations " .. (ns.db.reduceMotion and "off." or "on."))
     else
         ns.Toggle()
     end

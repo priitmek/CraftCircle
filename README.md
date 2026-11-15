@@ -1,8 +1,12 @@
 # CraftCircle
 
-![CraftCircle anvil logo](CraftCircle/Art/Logo.png)
+![CraftCircle Guild Knot logo](CraftCircle/Art/Logo.png)
 
 CraftCircle is a request board and recipe directory for World of Warcraft: Forever. It shares requests and opt-in recipe catalogs with guildmates and Battle.net friends through addon data.
+
+## What's new in 1.8.1
+
+CraftCircle has a Guild Knot logo, Atkinson Hyperlegible Next typography, and a jade interface with subtle transitions. Type `/craftcircle motion` to toggle animations.
 
 ## What's new in 1.8.0
 

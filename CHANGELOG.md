@@ -1,5 +1,11 @@
 # CraftCircle changelog
 
+## 1.8.1
+
+- **Guild Knot.** The new interlocking-ring logo appears in the window, launcher, and WoW's AddOns list.
+- **Typography.** CraftCircle now uses Atkinson Hyperlegible Next, with regular text and semibold headings, item names, and buttons.
+- **Interface.** Raised panels, recessed fields, and jade accents add depth. Short fades mark opening, tab changes, and row selection. Type `/craftcircle motion` to toggle animations.
+
 ## 1.8.0
 
 - **Shared checklist.** Set a pledge or record a delivery on item requests. See pledged, delivered, and remaining quantities.
